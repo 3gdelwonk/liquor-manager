@@ -3,11 +3,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-const base = process.env.VITE_BASE_PATH ?? './'
-const startUrl = process.env.VITE_BASE_PATH ?? './'
-
 export default defineConfig({
-  base,
+  base: './',
   build: {
     target: ['es2020', 'safari15'],
     rollupOptions: {
@@ -30,7 +27,7 @@ export default defineConfig({
         theme_color: '#7c3aed',
         background_color: '#ffffff',
         display: 'standalone',
-        start_url: startUrl,
+        start_url: './',
         icons: [
           {
             src: './manifest-icon-192.png',
