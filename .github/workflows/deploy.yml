@@ -27,6 +27,8 @@ jobs:
       - name: Build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          VITE_JARVIS_URL: ${{ secrets.VITE_JARVIS_URL }}
+          VITE_JARVIS_API_KEY: ${{ secrets.VITE_JARVIS_API_KEY }}
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

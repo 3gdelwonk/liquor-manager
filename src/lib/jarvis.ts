@@ -4,13 +4,17 @@
 // All requests authenticated with X-API-Key header
 // ═══════════════════════════════════════════════
 
-const BASE_URL = import.meta.env.VITE_JARVIS_URL as string;
-const API_KEY  = import.meta.env.VITE_JARVIS_API_KEY as string;
+function getBaseUrl(): string {
+  return localStorage.getItem('liquor-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || ''
+}
+function getApiKey(): string {
+  return localStorage.getItem('liquor-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || ''
+}
 
 async function jarvisFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${getBaseUrl()}${path}`, {
     headers: {
-      'X-API-Key': API_KEY,
+      'X-API-Key': getApiKey(),
       'Content-Type': 'application/json',
     },
   });

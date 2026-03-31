@@ -56,11 +56,27 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [leadTime, setLeadTime] = useState(() => {
     return parseInt(localStorage.getItem('liquor-manager-lead-time') ?? '2', 10)
   })
+  const [jarvisUrl, setJarvisUrl] = useState(
+    () => localStorage.getItem('liquor-manager-jarvis-url') ?? (import.meta.env.VITE_JARVIS_URL as string) ?? ''
+  )
+  const [jarvisKey, setJarvisKey] = useState(
+    () => localStorage.getItem('liquor-manager-jarvis-key') ?? (import.meta.env.VITE_JARVIS_API_KEY as string) ?? ''
+  )
   const [clearing, setClearing] = useState(false)
   const [confirm, setConfirm] = useState(false)
 
   function saveLead() {
     localStorage.setItem('liquor-manager-lead-time', String(leadTime))
+  }
+
+  function saveJarvis() {
+    if (jarvisUrl.trim()) {
+      localStorage.setItem('liquor-manager-jarvis-url', jarvisUrl.trim())
+      localStorage.setItem('liquor-manager-jarvis-key', jarvisKey.trim())
+    } else {
+      localStorage.removeItem('liquor-manager-jarvis-url')
+      localStorage.removeItem('liquor-manager-jarvis-key')
+    }
   }
 
   async function handleClear() {
@@ -95,6 +111,28 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
             <button onClick={saveLead} className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg">Save</button>
           </div>
           <p className="text-xs text-gray-400">Used for replenishment signals in Performance view</p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700">JARVISmart URL</label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={jarvisUrl}
+              onChange={(e) => setJarvisUrl(e.target.value)}
+              placeholder="http://192.168.20.100:3100"
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+            <button onClick={saveJarvis} className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg">Save</button>
+          </div>
+          <input
+            type="text"
+            value={jarvisKey}
+            onChange={(e) => setJarvisKey(e.target.value)}
+            placeholder="API key (optional on LAN)"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+          <p className="text-xs text-gray-400">Live Sales tab connection. Use HTTPS URL when on GitHub Pages.</p>
         </div>
 
         <div className="border-t border-gray-100 pt-4">

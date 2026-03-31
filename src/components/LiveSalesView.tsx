@@ -34,7 +34,7 @@ export default function LiveSalesView() {
   const [stockItems, setStockItems] = useState<StockItem[] | null>(null)
   const [stockSearch, setStockSearch] = useState('')
 
-  const isConfigured = !!import.meta.env.VITE_JARVIS_URL
+  const isConfigured = !!(localStorage.getItem('liquor-manager-jarvis-url') || import.meta.env.VITE_JARVIS_URL)
 
   const fetchAll = useCallback(async () => {
     if (!isConfigured) return
