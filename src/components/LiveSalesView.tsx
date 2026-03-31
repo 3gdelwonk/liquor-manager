@@ -15,6 +15,11 @@ function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function fmtPct(n: number | null) {
+  if (n === null) return '—'
+  return `${n.toFixed(1)}%`
+}
+
 export default function LiveSalesView() {
   const [liveTab, setLiveTab] = useState<LiveTab>('sales')
   const [period, setPeriod] = useState<Period>('today')
@@ -158,9 +163,13 @@ export default function LiveSalesView() {
     ? stockItems.filter(s =>
         !stockSearch ||
         s.description.toLowerCase().includes(stockSearch.toLowerCase()) ||
-        s.itemCode.toLowerCase().includes(stockSearch.toLowerCase())
+        s.itemCode.toLowerCase().includes(stockSearch.toLowerCase()) ||
+        s.department.toLowerCase().includes(stockSearch.toLowerCase())
       )
     : []
+
+  // Only show departments with sales > 0 in the chart
+  const activeDepts = deptBreakdown ? deptBreakdown.filter(d => d.sales > 0) : []
 
   return (
     <div className="flex flex-col h-full">
@@ -205,32 +214,44 @@ export default function LiveSalesView() {
         {liveTab === 'sales' && (
           <div className="p-4 space-y-5 pb-8">
 
-            {/* KPI cards */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
-                <p className="text-xs text-gray-500">Total Sales</p>
-                <p className="text-base font-bold text-gray-900">
-                  {salesSummary ? `$${fmtMoney(salesSummary.totalSales)}` : '—'}
-                </p>
-                <p className="text-xs text-gray-400">{period === 'today' ? 'Today' : 'This week'}</p>
+            {/* KPI grid */}
+            {salesSummary && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                  <p className="text-xs text-gray-500">Revenue</p>
+                  <p className="text-base font-bold text-gray-900">${fmtMoney(salesSummary.totalRevenue)}</p>
+                  <p className="text-xs text-gray-400">{period === 'today' ? 'Today' : 'This week'}</p>
+                </div>
+                <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                  <p className="text-xs text-gray-500">Gross Profit</p>
+                  <p className="text-base font-bold text-green-700">${fmtMoney(salesSummary.grossProfit)}</p>
+                  <p className="text-xs text-gray-400">{fmtPct(salesSummary.grossMarginPercent)} margin</p>
+                </div>
+                <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                  <p className="text-xs text-gray-500">Transactions</p>
+                  <p className="text-base font-bold text-gray-900">{salesSummary.totalTransactions.toLocaleString()}</p>
+                  <p className="text-xs text-gray-400">Avg basket ${fmtMoney(salesSummary.avgBasketSize)}</p>
+                </div>
+                <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                  <p className="text-xs text-gray-500">Promo Sales</p>
+                  <p className="text-base font-bold text-amber-600">${fmtMoney(salesSummary.promotionSales)}</p>
+                  <p className="text-xs text-gray-400">
+                    {salesSummary.totalRevenue > 0
+                      ? fmtPct((salesSummary.promotionSales / salesSummary.totalRevenue) * 100)
+                      : '—'} of revenue
+                  </p>
+                </div>
               </div>
-              <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
-                <p className="text-xs text-gray-500">Items Sold</p>
-                <p className="text-base font-bold text-gray-900">
-                  {salesSummary ? salesSummary.totalItems.toLocaleString() : '—'}
-                </p>
-                <p className="text-xs text-gray-400">{period === 'today' ? 'Today' : 'This week'}</p>
-              </div>
-            </div>
+            )}
 
             {/* Department bar chart */}
-            {deptBreakdown && deptBreakdown.length > 0 && (
+            {activeDepts.length > 0 && (
               <div>
                 <h2 className="text-sm font-semibold text-gray-700 mb-2">Sales by Department</h2>
-                <div className="h-48">
+                <div style={{ height: Math.max(160, activeDepts.length * 28) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={deptBreakdown}
+                      data={activeDepts}
                       layout="vertical"
                       margin={{ left: 4, right: 12, top: 4, bottom: 4 }}
                     >
@@ -238,14 +259,14 @@ export default function LiveSalesView() {
                       <YAxis
                         type="category"
                         dataKey="department"
-                        width={88}
+                        width={108}
                         tick={{ fontSize: 10 }}
                       />
                       <Tooltip
                         formatter={(v: number) => [`$${fmtMoney(v)}`, 'Sales']}
                       />
                       <Bar dataKey="sales" radius={[0, 4, 4, 0]}>
-                        {deptBreakdown.map((_, i) => (
+                        {activeDepts.map((_, i) => (
                           <Cell key={i} fill={DEPT_COLORS[i % DEPT_COLORS.length]} />
                         ))}
                       </Bar>
@@ -256,21 +277,22 @@ export default function LiveSalesView() {
             )}
 
             {/* Department table */}
-            {deptBreakdown && deptBreakdown.length > 0 && (
+            {activeDepts.length > 0 && (
               <div>
                 <h2 className="text-sm font-semibold text-gray-700 mb-2">Department Breakdown</h2>
                 <div className="overflow-x-auto -mx-4">
-                  <table className="w-full text-xs min-w-[280px]">
+                  <table className="w-full text-xs min-w-[340px]">
                     <thead className="bg-gray-50 text-gray-500">
                       <tr>
                         <th className="py-2 px-4 text-left font-medium">Department</th>
-                        <th className="py-2 px-3 text-right font-medium">Sales</th>
-                        <th className="py-2 px-4 text-right font-medium">Items</th>
+                        <th className="py-2 px-2 text-right font-medium">Sales</th>
+                        <th className="py-2 px-2 text-right font-medium">GP</th>
+                        <th className="py-2 px-3 text-right font-medium">Margin</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {deptBreakdown.map((d, i) => (
-                        <tr key={d.department} className="border-b border-gray-50">
+                      {activeDepts.map((d, i) => (
+                        <tr key={d.code} className="border-b border-gray-50">
                           <td className="py-2 px-4">
                             <div className="flex items-center gap-2">
                               <span
@@ -280,8 +302,9 @@ export default function LiveSalesView() {
                               {d.department}
                             </div>
                           </td>
-                          <td className="py-2 px-3 text-right font-mono">${fmtMoney(d.sales)}</td>
-                          <td className="py-2 px-4 text-right">{d.items.toLocaleString()}</td>
+                          <td className="py-2 px-2 text-right font-mono">${fmtMoney(d.sales)}</td>
+                          <td className="py-2 px-2 text-right font-mono text-green-700">${fmtMoney(d.grossProfit)}</td>
+                          <td className="py-2 px-3 text-right">{fmtPct(d.marginPercent)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -305,12 +328,19 @@ export default function LiveSalesView() {
             </div>
             {topSellers && topSellers.length > 0 ? (
               <div className="divide-y divide-gray-50">
-                {topSellers.map((item, i) => (
+                {topSellers.map(item => (
                   <div key={item.itemCode} className="flex items-center gap-3 py-2.5">
-                    <span className="text-xs text-gray-400 w-6 text-right shrink-0">{i + 1}</span>
+                    <span className="text-xs text-gray-400 w-6 text-right shrink-0">{item.rank}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-gray-800 truncate">{item.description}</p>
-                      <p className="text-xs text-gray-400">{item.itemCode}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-xs text-gray-400">{item.itemCode}</span>
+                        {item.department && (
+                          <span className="text-xs px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-medium">
+                            {item.department}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-xs font-semibold text-gray-700">{item.quantitySold} sold</p>
@@ -335,7 +365,7 @@ export default function LiveSalesView() {
               <input
                 value={stockSearch}
                 onChange={e => setStockSearch(e.target.value)}
-                placeholder="Search by name or code…"
+                placeholder="Search by name, code, or dept…"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
               />
             </div>
@@ -347,26 +377,28 @@ export default function LiveSalesView() {
             {filteredStock.length > 0 ? (
               <div className="divide-y divide-gray-50">
                 {filteredStock.map(item => {
-                  const low = item.reorderLevel !== undefined && item.onHand < item.reorderLevel
+                  const low = item.onHand < item.reorderLevel
+                  const negative = item.onHand < 0
                   return (
                     <div key={item.itemCode} className="flex items-center gap-3 py-3">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-gray-800 truncate">{item.description}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span className="text-xs text-gray-400">{item.itemCode}</span>
-                          {item.department && (
-                            <span className="text-xs px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-medium">
-                              {item.department}
-                            </span>
+                          <span className="text-xs px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-medium">
+                            {item.department}
+                          </span>
+                          {item.onOrder > 0 && (
+                            <span className="text-xs text-blue-500">+{item.onOrder} on order</span>
                           )}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className={`text-sm font-bold ${low ? 'text-red-600' : 'text-gray-800'}`}>
+                        <p className={`text-sm font-bold ${negative ? 'text-red-600' : low ? 'text-amber-600' : 'text-gray-800'}`}>
                           {item.onHand}
                         </p>
-                        <p className={`text-xs ${low ? 'text-red-400' : 'text-gray-400'}`}>
-                          {low ? `⚠ min ${item.reorderLevel}` : 'QOH'}
+                        <p className={`text-xs ${negative ? 'text-red-400' : low ? 'text-amber-400' : 'text-gray-400'}`}>
+                          {negative ? 'Negative' : low ? `⚠ min ${item.reorderLevel}` : 'QOH'}
                         </p>
                       </div>
                     </div>
