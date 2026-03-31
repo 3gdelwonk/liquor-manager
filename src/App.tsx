@@ -1,13 +1,14 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Package, BarChart2, Tag, Upload, Settings } from 'lucide-react'
+import { LayoutDashboard, Package, BarChart2, Tag, Upload, Settings, Activity } from 'lucide-react'
 import { clearAllData } from './lib/db'
 import Dashboard from './components/Dashboard'
 import ProductsView from './components/ProductsView'
 import PerformanceView from './components/PerformanceView'
 import PromotionsView from './components/PromotionsView'
 import ImportView from './components/ImportView'
+import LiveSalesView from './components/LiveSalesView'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'home' | 'products' | 'performance' | 'promos' | 'import'
+type Tab = 'home' | 'products' | 'performance' | 'promos' | 'import' | 'live'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'home',        label: 'Home',      icon: <LayoutDashboard size={18} /> },
@@ -120,6 +121,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'performance', label: 'Perform',   icon: <BarChart2 size={18} /> },
   { id: 'promos',      label: 'Promos',    icon: <Tag size={18} /> },
   { id: 'import',      label: 'Import',    icon: <Upload size={18} /> },
+  { id: 'live',        label: 'Live',      icon: <Activity size={18} /> },
 ]
 
 const TAB_TITLES: Record<Tab, string> = {
@@ -128,6 +130,7 @@ const TAB_TITLES: Record<Tab, string> = {
   performance: 'Performance',
   promos:      'Promotions',
   import:      'Import Data',
+  live:        'Live Sales',
 }
 
 const LAST_TAB_KEY = 'liquor-manager-last-tab'
@@ -152,6 +155,7 @@ export default function App() {
       case 'performance': return <PerformanceView />
       case 'promos':      return <PromotionsView />
       case 'import':      return <ImportView />
+      case 'live':        return <LiveSalesView />
     }
   }
 
