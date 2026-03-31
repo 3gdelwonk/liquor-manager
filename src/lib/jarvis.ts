@@ -31,6 +31,25 @@ async function jarvisFetch<T>(path: string): Promise<T> {
 
 // ── Raw API shapes (actual JARVISmart response) ─────────────────────────────
 
+interface RawPromoItem {
+  itemCode: string;
+  description: string;
+  department: string;
+  promoSellPrice: number;
+  normalSellPrice: number;
+  discountPercent: number;
+  marginAtPromoPrice: number;
+  promoCtnCost: number;
+  normalCtnCost: number;
+  promoUnitCost: number | null;
+  normalUnitCost: number;
+  ctnQty: number;
+  costSavingPercent: number | null;
+  startDate: string;
+  endDate: string;
+  daysLeft: number;
+}
+
 interface RawSalesSummary {
   period: string;
   dateFrom: string;
@@ -137,6 +156,23 @@ export interface StockItem {
   isOnReorder: boolean;
   avgDayQty: number;
   avgWeekQty: number;
+}
+
+export interface LivePromotion {
+  itemCode: string;
+  description: string;
+  department: string;
+  promoPrice: number;
+  normalPrice: number;
+  discountPercent: number;
+  marginPercent: number;
+  promoUnitCost: number | null;
+  normalUnitCost: number;
+  ctnQty: number;
+  costSavingPercent: number | null;
+  startDate: string;
+  endDate: string;
+  daysLeft: number;
 }
 
 export interface SearchResult {
@@ -263,4 +299,30 @@ export async function getPurchaseOrders(supplier?: string, opts: OrderOptions = 
   if (opts.status)  params.set('status', opts.status);
   params.set('limit', String(opts.limit ?? 100));
   return jarvisFetch<PurchaseOrder[]>(`/api/pos/orders?${params}`);
+}
+
+export async function getPromotions(): Promise<{ items: LivePromotion[]; count: number; expiringSoonCount: number }> {
+  const raw = await jarvisFetch<{ active: boolean; items: RawPromoItem[]; count: number; expiringSoonCount: number }>(
+    '/api/pos/promotions'
+  );
+  return {
+    items: raw.items.map(p => ({
+      itemCode:         p.itemCode,
+      description:      p.description.trim(),
+      department:       p.department,
+      promoPrice:       p.promoSellPrice,
+      normalPrice:      p.normalSellPrice,
+      discountPercent:  p.discountPercent,
+      marginPercent:    p.marginAtPromoPrice,
+      promoUnitCost:    p.promoUnitCost,
+      normalUnitCost:   p.normalUnitCost,
+      ctnQty:           p.ctnQty,
+      costSavingPercent: p.costSavingPercent,
+      startDate:        p.startDate,
+      endDate:          p.endDate,
+      daysLeft:         p.daysLeft,
+    })),
+    count: raw.count,
+    expiringSoonCount: raw.expiringSoonCount,
+  };
 }
