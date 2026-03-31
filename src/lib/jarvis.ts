@@ -86,7 +86,7 @@ export interface OrderOptions {
 
 export async function checkConnection(): Promise<ConnectionStatus> {
   try {
-    const data = await jarvisFetch<Omit<ConnectionStatus, 'connected'>>('/api/pos/health');
+    const data = await jarvisFetch<Omit<ConnectionStatus, 'connected'>>('/api/pos/status');
     return { connected: true, ...data };
   } catch (err) {
     return { connected: false, reason: (err as Error).message };
