@@ -4,12 +4,18 @@
 // All requests authenticated with X-API-Key header
 // ═══════════════════════════════════════════════
 
+const DEFAULT_URL = 'https://api.jarvismart196410.uk';
+
 function getBaseUrl(): string {
-  return localStorage.getItem('liquor-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || ''
+  return localStorage.getItem('liquor-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || DEFAULT_URL
 }
 function getApiKey(): string {
   return localStorage.getItem('liquor-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || ''
 }
+
+// Liquor department codes from Smart Retail POS
+export const LIQUOR_DEPT_CODES = new Set([20, 21, 22, 23, 25]);
+export const LIQUOR_DEPT_NAMES = new Set(['LIQUEURS', 'WINE', 'SPIRITS', 'LIQUOR/MISC', 'BEER']);
 
 async function jarvisFetch<T>(path: string): Promise<T> {
   const res = await fetch(`${getBaseUrl()}${path}`, {

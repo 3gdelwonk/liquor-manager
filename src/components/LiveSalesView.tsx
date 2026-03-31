@@ -1,22 +1,30 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, TrendingUp, Search } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import {
-  checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, getStockLevels,
-  type SalesSummary, type DepartmentBreakdown, type TopSeller, type StockItem,
+  checkConnection, getDepartmentBreakdown, getTopSellers, getStockLevels,
+  LIQUOR_DEPT_CODES, LIQUOR_DEPT_NAMES,
+  type DepartmentBreakdown, type TopSeller, type StockItem,
 } from '../lib/jarvis'
 
 type LiveTab = 'sales' | 'items' | 'stock'
 type Period = 'today' | 'week'
 
-const DEPT_COLORS = ['#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16']
+const DEPT_COLORS: Record<string, string> = {
+  WINE:          '#7c3aed',
+  SPIRITS:       '#3b82f6',
+  BEER:          '#10b981',
+  LIQUEURS:      '#f59e0b',
+  'LIQUOR/MISC': '#ec4899',
+}
+const FALLBACK_COLOR = '#94a3b8'
 
 function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function fmtPct(n: number | null) {
-  if (n === null) return '—'
+  if (n === null || isNaN(n)) return '—'
   return `${n.toFixed(1)}%`
 }
 
@@ -28,16 +36,12 @@ export default function LiveSalesView() {
   const [error, setError] = useState<string | null>(null)
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
 
-  const [salesSummary, setSalesSummary] = useState<SalesSummary | null>(null)
   const [deptBreakdown, setDeptBreakdown] = useState<DepartmentBreakdown[] | null>(null)
   const [topSellers, setTopSellers] = useState<TopSeller[] | null>(null)
   const [stockItems, setStockItems] = useState<StockItem[] | null>(null)
   const [stockSearch, setStockSearch] = useState('')
 
-  const isConfigured = !!(localStorage.getItem('liquor-manager-jarvis-url') || import.meta.env.VITE_JARVIS_URL)
-
   const fetchAll = useCallback(async () => {
-    if (!isConfigured) return
     setLoading(true)
     setError(null)
     try {
@@ -49,13 +53,11 @@ export default function LiveSalesView() {
         return
       }
       const days = period === 'today' ? 1 : 7
-      const [summary, depts, sellers, stock] = await Promise.all([
-        getSalesSummary(period),
+      const [depts, sellers, stock] = await Promise.all([
         getDepartmentBreakdown(period),
-        getTopSellers(days, 50),
+        getTopSellers(days, 100),
         getStockLevels(),
       ])
-      setSalesSummary(summary)
       setDeptBreakdown(depts)
       setTopSellers(sellers)
       setStockItems(stock)
@@ -66,10 +68,9 @@ export default function LiveSalesView() {
     } finally {
       setLoading(false)
     }
-  }, [period, isConfigured])
+  }, [period])
 
   useEffect(() => {
-    setSalesSummary(null)
     setDeptBreakdown(null)
     setTopSellers(null)
     fetchAll()
@@ -77,17 +78,49 @@ export default function LiveSalesView() {
     return () => clearInterval(id)
   }, [fetchAll])
 
-  // ── Not configured ──────────────────────────────────────────────────────────
+  // ── Liquor-only derived data ────────────────────────────────────────────────
 
-  if (!isConfigured) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
-        <WifiOff size={40} className="text-gray-300" />
-        <p className="text-sm font-medium text-gray-600">JARVISmart not configured</p>
-        <p className="text-xs text-gray-400">Add VITE_JARVIS_URL to your .env file to enable live POS data.</p>
-      </div>
-    )
-  }
+  const liquorDepts = useMemo(
+    () => deptBreakdown ? deptBreakdown.filter(d => LIQUOR_DEPT_CODES.has(d.code) && d.sales > 0) : [],
+    [deptBreakdown]
+  )
+
+  const liquorKPI = useMemo(() => {
+    if (!liquorDepts.length) return null
+    const revenue = liquorDepts.reduce((s, d) => s + d.sales, 0)
+    const gp      = liquorDepts.reduce((s, d) => s + d.grossProfit, 0)
+    const txn     = liquorDepts.reduce((s, d) => s + d.transactions, 0)
+    const promo   = liquorDepts.reduce((s, d) => s + d.promotionSales, 0)
+    return {
+      revenue,
+      grossProfit: gp,
+      margin: revenue > 0 ? (gp / revenue) * 100 : 0,
+      transactions: txn,
+      promoSales: promo,
+      promoPercent: revenue > 0 ? (promo / revenue) * 100 : 0,
+    }
+  }, [liquorDepts])
+
+  const liquorSellers = useMemo(
+    () => topSellers ? topSellers.filter(t => LIQUOR_DEPT_NAMES.has(t.department)) : [],
+    [topSellers]
+  )
+
+  const liquorStock = useMemo(
+    () => stockItems ? stockItems.filter(s => LIQUOR_DEPT_CODES.has(s.departmentCode)) : [],
+    [stockItems]
+  )
+
+  const filteredStock = useMemo(
+    () => stockSearch
+      ? liquorStock.filter(s =>
+          s.description.toLowerCase().includes(stockSearch.toLowerCase()) ||
+          s.itemCode.toLowerCase().includes(stockSearch.toLowerCase()) ||
+          s.department.toLowerCase().includes(stockSearch.toLowerCase())
+        )
+      : liquorStock,
+    [liquorStock, stockSearch]
+  )
 
   // ── Status banner ───────────────────────────────────────────────────────────
 
@@ -126,7 +159,7 @@ export default function LiveSalesView() {
 
   // ── Loading (first fetch) ───────────────────────────────────────────────────
 
-  if (loading && !salesSummary && !stockItems) {
+  if (loading && !deptBreakdown && !stockItems) {
     return (
       <div className="flex flex-col h-full">
         {statusBanner}
@@ -137,9 +170,9 @@ export default function LiveSalesView() {
     )
   }
 
-  // ── Offline / error (no cached data) ───────────────────────────────────────
+  // ── Offline / error ────────────────────────────────────────────────────────
 
-  if (connected === false && !salesSummary) {
+  if (connected === false && !deptBreakdown) {
     return (
       <div className="flex flex-col h-full">
         {statusBanner}
@@ -158,18 +191,6 @@ export default function LiveSalesView() {
       </div>
     )
   }
-
-  const filteredStock = stockItems
-    ? stockItems.filter(s =>
-        !stockSearch ||
-        s.description.toLowerCase().includes(stockSearch.toLowerCase()) ||
-        s.itemCode.toLowerCase().includes(stockSearch.toLowerCase()) ||
-        s.department.toLowerCase().includes(stockSearch.toLowerCase())
-      )
-    : []
-
-  // Only show departments with sales > 0 in the chart
-  const activeDepts = deptBreakdown ? deptBreakdown.filter(d => d.sales > 0) : []
 
   return (
     <div className="flex flex-col h-full">
@@ -214,44 +235,40 @@ export default function LiveSalesView() {
         {liveTab === 'sales' && (
           <div className="p-4 space-y-5 pb-8">
 
-            {/* KPI grid */}
-            {salesSummary && (
+            {/* Liquor KPI grid */}
+            {liquorKPI && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
-                  <p className="text-xs text-gray-500">Revenue</p>
-                  <p className="text-base font-bold text-gray-900">${fmtMoney(salesSummary.totalRevenue)}</p>
+                  <p className="text-xs text-gray-500">Liquor Revenue</p>
+                  <p className="text-base font-bold text-gray-900">${fmtMoney(liquorKPI.revenue)}</p>
                   <p className="text-xs text-gray-400">{period === 'today' ? 'Today' : 'This week'}</p>
                 </div>
                 <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
                   <p className="text-xs text-gray-500">Gross Profit</p>
-                  <p className="text-base font-bold text-green-700">${fmtMoney(salesSummary.grossProfit)}</p>
-                  <p className="text-xs text-gray-400">{fmtPct(salesSummary.grossMarginPercent)} margin</p>
+                  <p className="text-base font-bold text-green-700">${fmtMoney(liquorKPI.grossProfit)}</p>
+                  <p className="text-xs text-gray-400">{fmtPct(liquorKPI.margin)} margin</p>
                 </div>
                 <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
                   <p className="text-xs text-gray-500">Transactions</p>
-                  <p className="text-base font-bold text-gray-900">{salesSummary.totalTransactions.toLocaleString()}</p>
-                  <p className="text-xs text-gray-400">Avg basket ${fmtMoney(salesSummary.avgBasketSize)}</p>
+                  <p className="text-base font-bold text-gray-900">{liquorKPI.transactions.toLocaleString()}</p>
+                  <p className="text-xs text-gray-400">{liquorDepts.length} departments</p>
                 </div>
                 <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
                   <p className="text-xs text-gray-500">Promo Sales</p>
-                  <p className="text-base font-bold text-amber-600">${fmtMoney(salesSummary.promotionSales)}</p>
-                  <p className="text-xs text-gray-400">
-                    {salesSummary.totalRevenue > 0
-                      ? fmtPct((salesSummary.promotionSales / salesSummary.totalRevenue) * 100)
-                      : '—'} of revenue
-                  </p>
+                  <p className="text-base font-bold text-amber-600">${fmtMoney(liquorKPI.promoSales)}</p>
+                  <p className="text-xs text-gray-400">{fmtPct(liquorKPI.promoPercent)} of revenue</p>
                 </div>
               </div>
             )}
 
             {/* Department bar chart */}
-            {activeDepts.length > 0 && (
+            {liquorDepts.length > 0 && (
               <div>
-                <h2 className="text-sm font-semibold text-gray-700 mb-2">Sales by Department</h2>
-                <div style={{ height: Math.max(160, activeDepts.length * 28) }}>
+                <h2 className="text-sm font-semibold text-gray-700 mb-2">Sales by Category</h2>
+                <div style={{ height: Math.max(140, liquorDepts.length * 36) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={activeDepts}
+                      data={liquorDepts}
                       layout="vertical"
                       margin={{ left: 4, right: 12, top: 4, bottom: 4 }}
                     >
@@ -259,15 +276,13 @@ export default function LiveSalesView() {
                       <YAxis
                         type="category"
                         dataKey="department"
-                        width={108}
-                        tick={{ fontSize: 10 }}
+                        width={96}
+                        tick={{ fontSize: 11 }}
                       />
-                      <Tooltip
-                        formatter={(v: number) => [`$${fmtMoney(v)}`, 'Sales']}
-                      />
-                      <Bar dataKey="sales" radius={[0, 4, 4, 0]}>
-                        {activeDepts.map((_, i) => (
-                          <Cell key={i} fill={DEPT_COLORS[i % DEPT_COLORS.length]} />
+                      <Tooltip formatter={(v: number) => [`$${fmtMoney(v)}`, 'Sales']} />
+                      <Bar dataKey="sales" radius={[0, 6, 6, 0]}>
+                        {liquorDepts.map(d => (
+                          <Cell key={d.code} fill={DEPT_COLORS[d.department] ?? FALLBACK_COLOR} />
                         ))}
                       </Bar>
                     </BarChart>
@@ -277,27 +292,27 @@ export default function LiveSalesView() {
             )}
 
             {/* Department table */}
-            {activeDepts.length > 0 && (
+            {liquorDepts.length > 0 && (
               <div>
-                <h2 className="text-sm font-semibold text-gray-700 mb-2">Department Breakdown</h2>
+                <h2 className="text-sm font-semibold text-gray-700 mb-2">Category Breakdown</h2>
                 <div className="overflow-x-auto -mx-4">
                   <table className="w-full text-xs min-w-[340px]">
                     <thead className="bg-gray-50 text-gray-500">
                       <tr>
-                        <th className="py-2 px-4 text-left font-medium">Department</th>
+                        <th className="py-2 px-4 text-left font-medium">Category</th>
                         <th className="py-2 px-2 text-right font-medium">Sales</th>
                         <th className="py-2 px-2 text-right font-medium">GP</th>
                         <th className="py-2 px-3 text-right font-medium">Margin</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {activeDepts.map((d, i) => (
+                      {liquorDepts.map(d => (
                         <tr key={d.code} className="border-b border-gray-50">
                           <td className="py-2 px-4">
                             <div className="flex items-center gap-2">
                               <span
-                                className="w-2 h-2 rounded-full shrink-0"
-                                style={{ background: DEPT_COLORS[i % DEPT_COLORS.length] }}
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ background: DEPT_COLORS[d.department] ?? FALLBACK_COLOR }}
                               />
                               {d.department}
                             </div>
@@ -313,8 +328,8 @@ export default function LiveSalesView() {
               </div>
             )}
 
-            {!salesSummary && !loading && (
-              <p className="text-center text-sm text-gray-400 py-8">No sales data available</p>
+            {!liquorKPI && !loading && (
+              <p className="text-center text-sm text-gray-400 py-8">No liquor sales data</p>
             )}
           </div>
         )}
@@ -324,22 +339,29 @@ export default function LiveSalesView() {
           <div className="p-4 pb-8">
             <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-3">
               <TrendingUp size={12} />
-              <span>Top 50 sellers — {period === 'today' ? 'today' : 'last 7 days'}</span>
+              <span>
+                Top liquor sellers — {period === 'today' ? 'today' : 'last 7 days'}
+                {liquorSellers.length > 0 && ` · ${liquorSellers.length} items`}
+              </span>
             </div>
-            {topSellers && topSellers.length > 0 ? (
+            {liquorSellers.length > 0 ? (
               <div className="divide-y divide-gray-50">
-                {topSellers.map(item => (
+                {liquorSellers.map((item, i) => (
                   <div key={item.itemCode} className="flex items-center gap-3 py-2.5">
-                    <span className="text-xs text-gray-400 w-6 text-right shrink-0">{item.rank}</span>
+                    <span className="text-xs text-gray-400 w-6 text-right shrink-0">{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-gray-800 truncate">{item.description}</p>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-xs text-gray-400">{item.itemCode}</span>
-                        {item.department && (
-                          <span className="text-xs px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-medium">
-                            {item.department}
-                          </span>
-                        )}
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded font-medium"
+                          style={{
+                            backgroundColor: (DEPT_COLORS[item.department] ?? FALLBACK_COLOR) + '18',
+                            color: DEPT_COLORS[item.department] ?? FALLBACK_COLOR,
+                          }}
+                        >
+                          {item.department}
+                        </span>
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -351,7 +373,7 @@ export default function LiveSalesView() {
               </div>
             ) : (
               <p className="text-center text-sm text-gray-400 py-8">
-                {loading ? 'Loading…' : 'No items data'}
+                {loading ? 'Loading…' : 'No liquor items sold yet'}
               </p>
             )}
           </div>
@@ -365,13 +387,13 @@ export default function LiveSalesView() {
               <input
                 value={stockSearch}
                 onChange={e => setStockSearch(e.target.value)}
-                placeholder="Search by name, code, or dept…"
+                placeholder="Search liquor stock…"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
               />
             </div>
-            {stockItems && (
+            {liquorStock.length > 0 && (
               <p className="text-xs text-gray-400">
-                {filteredStock.length} of {stockItems.length} items · live QOH
+                {filteredStock.length} of {liquorStock.length} liquor items · live QOH
               </p>
             )}
             {filteredStock.length > 0 ? (
@@ -385,7 +407,13 @@ export default function LiveSalesView() {
                         <p className="text-sm text-gray-800 truncate">{item.description}</p>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span className="text-xs text-gray-400">{item.itemCode}</span>
-                          <span className="text-xs px-1.5 py-0.5 bg-violet-50 text-violet-600 rounded font-medium">
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded font-medium"
+                            style={{
+                              backgroundColor: (DEPT_COLORS[item.department] ?? FALLBACK_COLOR) + '18',
+                              color: DEPT_COLORS[item.department] ?? FALLBACK_COLOR,
+                            }}
+                          >
                             {item.department}
                           </span>
                           {item.onOrder > 0 && (
@@ -407,7 +435,7 @@ export default function LiveSalesView() {
               </div>
             ) : (
               <p className="text-center text-sm text-gray-400 py-8">
-                {loading ? 'Loading…' : stockSearch ? 'No matches' : 'No stock data'}
+                {loading ? 'Loading…' : stockSearch ? 'No matches' : 'No liquor stock data'}
               </p>
             )}
           </div>
