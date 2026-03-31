@@ -5,12 +5,13 @@
 // ═══════════════════════════════════════════════
 
 const DEFAULT_URL = 'https://api.jarvismart196410.uk';
+const DEFAULT_KEY = 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d';
 
 function getBaseUrl(): string {
   return localStorage.getItem('liquor-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || DEFAULT_URL
 }
 function getApiKey(): string {
-  return localStorage.getItem('liquor-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || ''
+  return localStorage.getItem('liquor-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || DEFAULT_KEY
 }
 
 // Liquor department codes from Smart Retail POS
