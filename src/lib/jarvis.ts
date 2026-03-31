@@ -301,28 +301,41 @@ export async function getPurchaseOrders(supplier?: string, opts: OrderOptions = 
   return jarvisFetch<PurchaseOrder[]>(`/api/pos/orders?${params}`);
 }
 
+const LIQUOR_DEPTS = ['BEER', 'WINE', 'SPIRITS', 'LIQUEURS', 'LIQUOR/MISC'];
+
 export async function getPromotions(): Promise<{ items: LivePromotion[]; count: number; expiringSoonCount: number }> {
-  const raw = await jarvisFetch<{ active: boolean; items: RawPromoItem[]; count: number; expiringSoonCount: number }>(
-    '/api/pos/promotions'
+  const results = await Promise.all(
+    LIQUOR_DEPTS.map(dept =>
+      jarvisFetch<{ active: boolean; items: RawPromoItem[]; count: number; expiringSoonCount: number }>(
+        `/api/pos/promotions?department=${encodeURIComponent(dept)}&limit=1000`
+      )
+    )
   );
-  return {
-    items: raw.items.map(p => ({
-      itemCode:         p.itemCode,
-      description:      p.description.trim(),
-      department:       p.department,
-      promoPrice:       p.promoSellPrice,
-      normalPrice:      p.normalSellPrice,
-      discountPercent:  p.discountPercent,
-      marginPercent:    p.marginAtPromoPrice,
-      promoUnitCost:    p.promoUnitCost,
-      normalUnitCost:   p.normalUnitCost,
-      ctnQty:           p.ctnQty,
-      costSavingPercent: p.costSavingPercent,
-      startDate:        p.startDate,
-      endDate:          p.endDate,
-      daysLeft:         p.daysLeft,
-    })),
-    count: raw.count,
-    expiringSoonCount: raw.expiringSoonCount,
-  };
+
+  const allItems: LivePromotion[] = [];
+  let expiringSoonCount = 0;
+
+  for (const raw of results) {
+    expiringSoonCount += raw.expiringSoonCount;
+    for (const p of raw.items) {
+      allItems.push({
+        itemCode:         p.itemCode,
+        description:      p.description.trim(),
+        department:       p.department,
+        promoPrice:       p.promoSellPrice,
+        normalPrice:      p.normalSellPrice,
+        discountPercent:  p.discountPercent,
+        marginPercent:    p.marginAtPromoPrice,
+        promoUnitCost:    p.promoUnitCost,
+        normalUnitCost:   p.normalUnitCost,
+        ctnQty:           p.ctnQty,
+        costSavingPercent: p.costSavingPercent,
+        startDate:        p.startDate,
+        endDate:          p.endDate,
+        daysLeft:         p.daysLeft,
+      });
+    }
+  }
+
+  return { items: allItems, count: allItems.length, expiringSoonCount };
 }

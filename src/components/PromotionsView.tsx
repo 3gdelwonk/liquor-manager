@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, Tag, AlertTriangle } from 'lucide-react'
 import {
-  checkConnection, getPromotions, LIQUOR_DEPT_NAMES,
+  checkConnection, getPromotions,
   type LivePromotion,
 } from '../lib/jarvis'
 
@@ -104,11 +104,9 @@ export default function PromotionsView() {
         return
       }
       const data = await getPromotions()
-      // Filter to liquor departments only
-      const liquorPromos = data.items.filter(p => LIQUOR_DEPT_NAMES.has(p.department))
-      setAllPromos(liquorPromos)
-      setTotalCount(liquorPromos.length)
-      setExpiringSoon(liquorPromos.filter(p => p.daysLeft <= 2).length)
+      setAllPromos(data.items)
+      setTotalCount(data.count)
+      setExpiringSoon(data.expiringSoonCount)
       setLastFetch(new Date())
     } catch (err) {
       setError((err as Error).message)
