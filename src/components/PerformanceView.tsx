@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 import {
   getLatestQoh, classifyABC, classifyXYZ, computePerformance, stockValue, opportunityMatrix,
   snapshotAgeDays, needsReplenishment,
 } from '../lib/analytics'
+import { getPromotions } from '../lib/jarvis'
 import type { StockPerformance } from '../lib/types'
 import { LEAD_TIME_DEFAULT } from '../lib/constants'
 
@@ -31,6 +32,15 @@ export default function PerformanceView() {
   const [sortAsc, setSortAsc] = useState(false)
   const [deadOpen, setDeadOpen] = useState(false)
   const [matrixTip, setMatrixTip] = useState<number | null>(null)
+  const [promoItemCodes, setPromoItemCodes] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    getPromotions().then(data => {
+      const today = new Date().toISOString().slice(0, 10)
+      const codes = new Set(data.items.filter(p => p.startDate.slice(0, 10) <= today).map(p => p.itemCode))
+      setPromoItemCodes(codes)
+    }).catch(() => {})
+  }, [])
 
   const leadTime = LEAD_TIME_DEFAULT
 
@@ -191,7 +201,8 @@ export default function PerformanceView() {
                       <tr key={product.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                         <td className="py-2 px-2 max-w-[140px]">
                           <span className="truncate block">{product.name}</span>
-                          {replenish && <span className="text-red-500 text-[10px]">🔴 Reorder</span>}
+                          {promoItemCodes.has(product.barcode) && <span className="text-[10px] font-medium px-1 py-0.5 rounded bg-violet-100 text-violet-600">PROMO</span>}
+                          {replenish && <span className="text-red-500 text-[10px] ml-1">🔴 Reorder</span>}
                           {(ageDays ?? 0) > 7 && <span className="text-amber-500 text-[10px] ml-1">⚠️ Stale</span>}
                         </td>
                         <td className="py-2 px-2">{qoh ?? '—'}</td>
