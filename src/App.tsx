@@ -64,11 +64,8 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [jarvisKey, setJarvisKey] = useState(
     () => localStorage.getItem('liquor-manager-jarvis-key') ?? (import.meta.env.VITE_JARVIS_API_KEY as string) ?? ''
   )
-  const [googleApiKey, setGoogleApiKey] = useState(
-    () => localStorage.getItem('liquor-manager-google-api-key') ?? (import.meta.env.VITE_GOOGLE_API_KEY as string) ?? ''
-  )
-  const [googleCseId, setGoogleCseId] = useState(
-    () => localStorage.getItem('liquor-manager-google-cse-id') ?? (import.meta.env.VITE_GOOGLE_CSE_ID as string) ?? ''
+  const [serperApiKey, setSerperApiKey] = useState(
+    () => localStorage.getItem('liquor-manager-serper-api-key') ?? (import.meta.env.VITE_SERPER_API_KEY as string) ?? ''
   )
   const [clearing, setClearing] = useState(false)
   const [confirm, setConfirm] = useState(false)
@@ -90,13 +87,11 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
-  function saveGoogle() {
-    if (googleApiKey.trim()) {
-      localStorage.setItem('liquor-manager-google-api-key', googleApiKey.trim())
-      localStorage.setItem('liquor-manager-google-cse-id', googleCseId.trim())
+  function saveSerper() {
+    if (serperApiKey.trim()) {
+      localStorage.setItem('liquor-manager-serper-api-key', serperApiKey.trim())
     } else {
-      localStorage.removeItem('liquor-manager-google-api-key')
-      localStorage.removeItem('liquor-manager-google-cse-id')
+      localStorage.removeItem('liquor-manager-serper-api-key')
     }
   }
 
@@ -178,25 +173,18 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">Google Image Search</label>
+          <label className="text-sm font-medium text-gray-700">Product Images (Serper.dev)</label>
           <div className="flex gap-2">
             <input
               type="text"
-              value={googleApiKey}
-              onChange={(e) => setGoogleApiKey(e.target.value)}
-              placeholder="Google API Key"
+              value={serperApiKey}
+              onChange={(e) => setSerperApiKey(e.target.value)}
+              placeholder="Serper API Key (optional — default included)"
               className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
             />
-            <button onClick={saveGoogle} className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg">Save</button>
+            <button onClick={saveSerper} className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg">Save</button>
           </div>
-          <input
-            type="text"
-            value={googleCseId}
-            onChange={(e) => setGoogleCseId(e.target.value)}
-            placeholder="Custom Search Engine ID"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
-          <p className="text-xs text-gray-400">For product images. Get keys at console.cloud.google.com</p>
+          <p className="text-xs text-gray-400">For product images via Google Images. Default key included (2,500 free queries).</p>
           {isImageSearchConfigured() && (
             <div className="mt-2">
               <button

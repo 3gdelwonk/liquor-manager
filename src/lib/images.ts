@@ -1,9 +1,12 @@
 // ═══════════════════════════════════════════════
 // Product Image Service
-// Fetches product images via Google search, caches in IndexedDB
+// Fetches product images via Serper.dev (Google Images), caches in IndexedDB
 // ═══════════════════════════════════════════════
 
 import { db } from './db'
+
+// Default Serper API key (free 2,500 queries)
+const DEFAULT_SERPER_KEY = '189a40fd7365625bd484571377c563e96c88820c'
 
 // POS description abbreviation map for better search queries
 const ABBREV: Record<string, string> = {
@@ -49,56 +52,55 @@ function buildSearchQuery(description: string, department: string, barcode?: str
   return `${cleaned} ${deptHint}`
 }
 
-// Google Custom Search API — user sets key in settings or we use env var
-function getGoogleApiKey(): string {
-  return localStorage.getItem('liquor-manager-google-api-key') || (import.meta.env.VITE_GOOGLE_API_KEY as string) || ''
-}
-function getGoogleCseId(): string {
-  return localStorage.getItem('liquor-manager-google-cse-id') || (import.meta.env.VITE_GOOGLE_CSE_ID as string) || ''
+// Serper.dev API — user sets key in settings or we use default
+function getSerperApiKey(): string {
+  return localStorage.getItem('liquor-manager-serper-api-key') || (import.meta.env.VITE_SERPER_API_KEY as string) || DEFAULT_SERPER_KEY
 }
 
 export function isImageSearchConfigured(): boolean {
-  return !!(getGoogleApiKey() && getGoogleCseId())
+  return !!getSerperApiKey()
 }
 
-interface GoogleSearchResult {
-  items?: { link: string; image?: { width: number; height: number } }[]
-  error?: { code: number; message: string }
+interface SerperImageResult {
+  title: string
+  imageUrl: string
+  imageWidth: number
+  imageHeight: number
+  source: string
+  domain: string
 }
 
-async function googleImageSearch(query: string): Promise<string | null | 'error'> {
-  const apiKey = getGoogleApiKey()
-  const cseId = getGoogleCseId()
-  if (!apiKey || !cseId) return 'error'
+interface SerperResponse {
+  images?: SerperImageResult[]
+  message?: string
+}
 
-  const params = new URLSearchParams({
-    key: apiKey,
-    cx: cseId,
-    q: query,
-    searchType: 'image',
-    num: '3',
-    safe: 'active',
-  })
+async function serperImageSearch(query: string): Promise<string | null | 'error'> {
+  const apiKey = getSerperApiKey()
+  if (!apiKey) return 'error'
 
   try {
-    const res = await fetch(`https://www.googleapis.com/customsearch/v1?${params}`)
+    const res = await fetch('https://google.serper.dev/images', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ q: query, num: 5 }),
+    })
+
     if (!res.ok) {
       const text = await res.text()
-      console.warn(`[ImageSearch] API error ${res.status}: ${text.slice(0, 200)}`)
-      return 'error' // transient error — don't cache as "not found"
-    }
-    const data: GoogleSearchResult = await res.json()
-    if (data.error) {
-      console.warn(`[ImageSearch] API error: ${data.error.message}`)
+      console.warn(`[ImageSearch] Serper API error ${res.status}: ${text.slice(0, 200)}`)
       return 'error'
     }
+
+    const data: SerperResponse = await res.json()
+    if (!data.images || data.images.length === 0) return null
+
     // Pick the first image that looks like a product photo (not a tiny icon)
-    const img = data.items?.find(i => {
-      const w = i.image?.width ?? 0
-      const h = i.image?.height ?? 0
-      return w >= 100 && h >= 100
-    })
-    return img?.link ?? data.items?.[0]?.link ?? null
+    const img = data.images.find(i => i.imageWidth >= 100 && i.imageHeight >= 100)
+    return img?.imageUrl ?? data.images[0]?.imageUrl ?? null
   } catch (err) {
     console.warn('[ImageSearch] Fetch error:', err)
     return 'error'
@@ -123,11 +125,11 @@ export async function fetchAndCacheImage(
   if (cached !== null) return cached || null // empty string = "no image found"
 
   // Try barcode search first, then fall back to name search
-  let imageUrl = await googleImageSearch(buildSearchQuery(description, department, barcode))
+  let imageUrl = await serperImageSearch(buildSearchQuery(description, department, barcode))
 
   // If barcode search failed to find results (not an error), try name-based search
   if (imageUrl === null && barcode) {
-    imageUrl = await googleImageSearch(buildSearchQuery(description, department))
+    imageUrl = await serperImageSearch(buildSearchQuery(description, department))
   }
 
   // Don't cache transient errors — only cache real results (found or genuinely not found)
@@ -187,7 +189,7 @@ export async function prefetchImages(
     }
     onProgress?.({ total: items.length, done, found, errors, current: item.description })
 
-    // Rate limit: ~1 request per second to stay within Google API limits
+    // Rate limit: ~1 request per second to stay within API limits
     await new Promise(r => setTimeout(r, 1100))
   }
 
