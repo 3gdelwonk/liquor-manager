@@ -6,6 +6,7 @@ interface ProductImageProps {
   itemCode: string
   description: string
   department: string
+  barcode?: string | null
   size?: number
   className?: string
 }
@@ -26,7 +27,7 @@ const DEPT_BG: Record<string, string> = {
   'LIQUOR/MISC': 'bg-pink-50 text-pink-300',
 }
 
-export default function ProductImage({ itemCode, description, department, size = 48, className = '' }: ProductImageProps) {
+export default function ProductImage({ itemCode, description, department, barcode, size = 48, className = '' }: ProductImageProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -43,7 +44,7 @@ export default function ProductImage({ itemCode, description, department, size =
 
       // If configured and not cached, fetch in background
       if (isImageSearchConfigured() && cached === null) {
-        const url = await fetchAndCacheImage(itemCode, description, department)
+        const url = await fetchAndCacheImage(itemCode, description, department, barcode)
         if (url && !cancelled) {
           setImageUrl(url)
         }

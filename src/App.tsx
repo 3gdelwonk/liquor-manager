@@ -4,7 +4,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 import { LayoutDashboard, Package, BarChart2, Tag, Upload, Settings, Activity } from 'lucide-react'
 import { clearAllData } from './lib/db'
 import { getStockLevels, LIQUOR_DEPT_NAMES } from './lib/jarvis'
-import { prefetchImages, isImageSearchConfigured, type PrefetchProgress } from './lib/images'
+import { prefetchImages, isImageSearchConfigured, clearImageCache, type PrefetchProgress } from './lib/images'
 import Dashboard from './components/Dashboard'
 import ProductsView from './components/ProductsView'
 import PerformanceView from './components/PerformanceView'
@@ -115,7 +115,7 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
       const liquorItems = stock
         .filter(s => LIQUOR_DEPT_NAMES.has(s.department))
         .sort((a, b) => b.avgDayQty - a.avgDayQty)
-        .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department }))
+        .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode }))
       await prefetchImages(liquorItems, setPrefetchProgress, controller.signal)
     } catch { /* aborted or error */ }
     setPrefetching(false)
@@ -206,7 +206,7 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
                 }`}
               >
                 {prefetching
-                  ? `${prefetchProgress ? `${prefetchProgress.done}/${prefetchProgress.total} (${prefetchProgress.found} found)` : 'Starting...'} — tap to stop`
+                  ? `${prefetchProgress ? `${prefetchProgress.done}/${prefetchProgress.total} (${prefetchProgress.found} found${prefetchProgress.errors ? `, ${prefetchProgress.errors} errors` : ''})` : 'Starting...'} — tap to stop`
                   : 'Fetch Product Images'}
               </button>
               {prefetching && prefetchProgress && (
@@ -214,6 +214,12 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
                   {prefetchProgress.current}
                 </p>
               )}
+              <button
+                onClick={async () => { const n = await clearImageCache(); alert(`Cleared ${n} cached entries. Images will be re-fetched.`) }}
+                className="w-full mt-1 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200"
+              >
+                Clear Image Cache
+              </button>
             </div>
           )}
         </div>
