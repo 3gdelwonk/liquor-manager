@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus, Search, ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle,
-  CheckCircle, XCircle, ScanBarcode, Bell, X, RefreshCw, Tag, DollarSign, Calendar
+  CheckCircle, XCircle, ScanBarcode, Bell, X, RefreshCw, Tag, DollarSign, Calendar,
+  ChevronUp, ChevronDown, ArrowUpDown
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { db, type TrackedItem, type TrackedPromo } from '../lib/db'
@@ -168,6 +169,54 @@ function ComparisonRow({ label, before, after, format, invertColor }: {
       </div>
     </div>
   )
+}
+
+// ── Reorder helpers ─────────────────────────────────────────────────────────
+
+function sortByOrder<T extends { sortOrder?: number; createdAt: Date }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const oa = a.sortOrder ?? Infinity
+    const ob = b.sortOrder ?? Infinity
+    if (oa !== ob) return oa - ob
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  })
+}
+
+async function swapOrder(
+  table: 'trackedPromos' | 'trackedItems',
+  items: { id?: number; sortOrder?: number }[],
+  fromIndex: number,
+  toIndex: number
+) {
+  if (toIndex < 0 || toIndex >= items.length) return
+  const a = items[fromIndex]
+  const b = items[toIndex]
+  if (!a.id || !b.id) return
+  const orderA = a.sortOrder ?? fromIndex
+  const orderB = b.sortOrder ?? toIndex
+  const dbTable = table === 'trackedPromos' ? db.trackedPromos : db.trackedItems
+  await dbTable.update(a.id, { sortOrder: orderB })
+  await dbTable.update(b.id, { sortOrder: orderA })
+}
+
+async function assignOrderIfNeeded(
+  table: 'trackedPromos' | 'trackedItems',
+  items: { id?: number; sortOrder?: number }[]
+) {
+  const dbTable = table === 'trackedPromos' ? db.trackedPromos : db.trackedItems
+  let needsAssign = false
+  for (const item of items) {
+    if (item.sortOrder === undefined) { needsAssign = true; break }
+  }
+  if (needsAssign) {
+    await db.transaction('rw', dbTable, async () => {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id && items[i].sortOrder === undefined) {
+          await dbTable.update(items[i].id!, { sortOrder: i })
+        }
+      }
+    })
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -553,6 +602,7 @@ function PromoTrackingList() {
   const [showAdd, setShowAdd] = useState(false)
   const [selectedPromo, setSelectedPromo] = useState<TrackedPromo | null>(null)
   const [filter, setFilter] = useState<'all' | 'active' | 'ended' | 'completed'>('all')
+  const [reordering, setReordering] = useState(false)
   const [, forceUpdate] = useState(0)
 
   const refresh = useCallback(() => forceUpdate(n => n + 1), [])
@@ -572,7 +622,8 @@ function PromoTrackingList() {
     _effectiveStatus: (p.status === 'active' && p.endDate && p.endDate.slice(0, 10) < today) ? 'ended' as const : p.status,
   }))
 
-  const filtered = promos.filter(p => filter === 'all' || p._effectiveStatus === filter)
+  const sorted = sortByOrder(promos)
+  const filtered = sorted.filter(p => filter === 'all' || p._effectiveStatus === filter)
   const counts = {
     all: promos.length,
     active: promos.filter(p => p._effectiveStatus === 'active').length,
@@ -580,10 +631,21 @@ function PromoTrackingList() {
     completed: promos.filter(p => p._effectiveStatus === 'completed').length,
   }
 
+  async function handleToggleReorder() {
+    if (!reordering && trackedPromos) {
+      await assignOrderIfNeeded('trackedPromos', trackedPromos)
+    }
+    setReordering(r => !r)
+  }
+
+  async function handleMove(index: number, direction: -1 | 1) {
+    await swapOrder('trackedPromos', filtered, index, index + direction)
+  }
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Filter tabs */}
-      <div className="flex gap-1 px-4 py-2 border-b border-gray-100 shrink-0">
+      {/* Filter tabs + reorder toggle */}
+      <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-100 shrink-0">
         {(['all', 'active', 'ended', 'completed'] as const).map(f => (
           <button
             key={f}
@@ -595,6 +657,15 @@ function PromoTrackingList() {
             {f === 'completed' ? 'Reviewed' : f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
           </button>
         ))}
+        <button
+          onClick={handleToggleReorder}
+          className={`p-1.5 rounded-lg shrink-0 transition-colors ${
+            reordering ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-violet-600'
+          }`}
+          title="Reorder items"
+        >
+          <ArrowUpDown size={14} />
+        </button>
       </div>
 
       {/* List */}
@@ -615,12 +686,29 @@ function PromoTrackingList() {
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {filtered.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime()).map(item => {
-              return (
+            {filtered.map((item, idx) => (
+              <div key={item.id} className="flex items-center">
+                {reordering && (
+                  <div className="flex flex-col pl-2 shrink-0">
+                    <button
+                      onClick={() => handleMove(idx, -1)}
+                      disabled={idx === 0}
+                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
+                    >
+                      <ChevronUp size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleMove(idx, 1)}
+                      disabled={idx === filtered.length - 1}
+                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
+                    >
+                      <ChevronDown size={16} />
+                    </button>
+                  </div>
+                )}
                 <button
-                  key={item.id}
-                  onClick={() => setSelectedPromo(item)}
-                  className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 text-left"
+                  onClick={() => !reordering && setSelectedPromo(item)}
+                  className={`flex-1 flex items-center gap-3 p-3 text-left ${reordering ? '' : 'hover:bg-gray-50'}`}
                 >
                   <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
                   <div className="flex-1 min-w-0">
@@ -638,10 +726,10 @@ function PromoTrackingList() {
                       </span>
                     </div>
                   </div>
-                  <PromoStatusBadge status={item._effectiveStatus} endDate={item.endDate} />
+                  {!reordering && <PromoStatusBadge status={item._effectiveStatus} endDate={item.endDate} />}
                 </button>
-              )
-            })}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -1097,6 +1185,7 @@ function PriceTrackingList() {
   const [filter, setFilter] = useState<'all' | 'active' | 'reverted' | 'completed'>('all')
   const [showAdd, setShowAdd] = useState(false)
   const [selectedItem, setSelectedItem] = useState<TrackedItem | null>(null)
+  const [reordering, setReordering] = useState(false)
   const [, forceUpdate] = useState(0)
 
   // Auto-detection state
@@ -1167,12 +1256,24 @@ function PriceTrackingList() {
     setSelectedItem(null)
   }
 
-  const filtered = trackedItems.filter(t => filter === 'all' || t.status === filter)
+  const sorted = sortByOrder(trackedItems)
+  const filtered = sorted.filter(t => filter === 'all' || t.status === filter)
   const counts = {
     all: trackedItems.length,
     active: trackedItems.filter(t => t.status === 'active').length,
     reverted: trackedItems.filter(t => t.status === 'reverted').length,
     completed: trackedItems.filter(t => t.status === 'completed').length,
+  }
+
+  async function handleToggleReorder() {
+    if (!reordering && trackedItems) {
+      await assignOrderIfNeeded('trackedItems', trackedItems)
+    }
+    setReordering(r => !r)
+  }
+
+  async function handleMove(index: number, direction: -1 | 1) {
+    await swapOrder('trackedItems', filtered, index, index + direction)
   }
 
   return (
@@ -1185,8 +1286,8 @@ function PriceTrackingList() {
         onDismissAll={handleDismissAll}
       />
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 px-4 py-2 border-b border-gray-100 shrink-0">
+      {/* Filter tabs + reorder toggle */}
+      <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-100 shrink-0">
         {(['all', 'active', 'reverted', 'completed'] as const).map(f => (
           <button
             key={f}
@@ -1198,6 +1299,15 @@ function PriceTrackingList() {
             {f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
           </button>
         ))}
+        <button
+          onClick={handleToggleReorder}
+          className={`p-1.5 rounded-lg shrink-0 transition-colors ${
+            reordering ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-violet-600'
+          }`}
+          title="Reorder items"
+        >
+          <ArrowUpDown size={14} />
+        </button>
       </div>
 
       {/* Refresh button */}
@@ -1231,24 +1341,43 @@ function PriceTrackingList() {
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {filtered.sort((a, b) => new Date(b.changeDate).getTime() - new Date(a.changeDate).getTime()).map(item => (
-              <button
-                key={item.id}
-                onClick={() => setSelectedItem(item)}
-                className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 text-left"
-              >
-                <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-gray-400">
-                      {fmtPrice(item.originalPrice)} → <span className="text-violet-600 font-medium">{fmtPrice(item.newPrice)}</span>
-                    </span>
-                    <span className="text-[10px] text-gray-300">{fmtDate(item.changeDate)}</span>
+            {filtered.map((item, idx) => (
+              <div key={item.id} className="flex items-center">
+                {reordering && (
+                  <div className="flex flex-col pl-2 shrink-0">
+                    <button
+                      onClick={() => handleMove(idx, -1)}
+                      disabled={idx === 0}
+                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
+                    >
+                      <ChevronUp size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleMove(idx, 1)}
+                      disabled={idx === filtered.length - 1}
+                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
+                    >
+                      <ChevronDown size={16} />
+                    </button>
                   </div>
-                </div>
-                <PriceStatusBadge status={item.status} revertedAt={item.revertedAt} />
-              </button>
+                )}
+                <button
+                  onClick={() => !reordering && setSelectedItem(item)}
+                  className={`flex-1 flex items-center gap-3 p-3 text-left ${reordering ? '' : 'hover:bg-gray-50'}`}
+                >
+                  <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs text-gray-400">
+                        {fmtPrice(item.originalPrice)} → <span className="text-violet-600 font-medium">{fmtPrice(item.newPrice)}</span>
+                      </span>
+                      <span className="text-[10px] text-gray-300">{fmtDate(item.changeDate)}</span>
+                    </div>
+                  </div>
+                  {!reordering && <PriceStatusBadge status={item.status} revertedAt={item.revertedAt} />}
+                </button>
+              </div>
             ))}
           </div>
         )}

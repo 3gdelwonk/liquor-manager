@@ -20,6 +20,7 @@ export interface TrackedItem {
   status: 'active' | 'reverted' | 'completed'
   currentPrice: number | null
   revertedAt: string | null
+  sortOrder?: number
   createdAt: Date
 }
 
@@ -42,6 +43,7 @@ export interface TrackedPromo {
   daysLeft: number
   notes: string
   status: 'active' | 'ended' | 'completed'
+  sortOrder?: number
   createdAt: Date
 }
 
