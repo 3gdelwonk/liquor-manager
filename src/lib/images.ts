@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════
 // Product Image Service
-// Fetches product images via Serper.dev (Google Images), caches in IndexedDB
+// Priority: JARVISmart server cache → local IndexedDB cache → Serper.dev fetch
 // ═══════════════════════════════════════════════
 
 import { db } from './db'
@@ -8,7 +8,47 @@ import { db } from './db'
 // Default Serper API key (free 2,500 queries)
 const DEFAULT_SERPER_KEY = '189a40fd7365625bd484571377c563e96c88820c'
 
-// POS description abbreviation map for better search queries
+// ── JARVISmart server-side image cache ────────────────────────────────────────
+
+function getJarvisBaseUrl(): string {
+  return localStorage.getItem('liquor-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || 'https://api.jarvismart196410.uk'
+}
+function getJarvisApiKey(): string {
+  return localStorage.getItem('liquor-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d'
+}
+
+/** Check JARVISmart for a server-cached image URL */
+async function getJarvisImage(itemCode: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/image/${encodeURIComponent(itemCode)}`, {
+      headers: { 'X-API-Key': getJarvisApiKey() },
+    })
+    if (!res.ok) return null
+    const data: { imageUrl?: string } = await res.json()
+    return data.imageUrl || null
+  } catch {
+    return null
+  }
+}
+
+/** Push a discovered image URL to JARVISmart for shared caching */
+async function pushImageToJarvis(itemCode: string, imageUrl: string): Promise<void> {
+  try {
+    await fetch(`${getJarvisBaseUrl()}/api/pos/image/${encodeURIComponent(itemCode)}`, {
+      method: 'PUT',
+      headers: {
+        'X-API-Key': getJarvisApiKey(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ imageUrl }),
+    })
+  } catch {
+    // Non-critical — server cache is best-effort
+  }
+}
+
+// ── POS description cleaner ──────────────────────────────────────────────────
+
 const ABBREV: Record<string, string> = {
   'VLY': 'VALLEY', 'MARLB': 'MARLBOROUGH', 'SAV': 'SAUVIGNON', 'BLNC': 'BLANC',
   'CAB': 'CABERNET', 'SAUV': 'SAUVIGNON', 'SHZ': 'SHIRAZ', 'CHARD': 'CHARDONNAY',
@@ -23,23 +63,17 @@ const ABBREV: Record<string, string> = {
 }
 
 function cleanDescription(desc: string): string {
-  // Remove size info (750ML, 375ML, 4*200ML, 4X200ML, etc.)
   let clean = desc.replace(/\d+[*xX]?\d*\s*ML/gi, '').replace(/\d+\s*L\b/gi, '')
-  // Remove pack counts (4S, 6PK, 10PK, 4X, 2PK, etc.)
   clean = clean.replace(/\b\d+\s*(S|PK|X)\b/gi, '')
-  // Remove trailing weight/size patterns
   clean = clean.replace(/\b\d+\s*(GM|KG|G)\b/gi, '')
-  // Expand abbreviations
   clean = clean.split(/[\s/]+/).map(word => {
     const upper = word.toUpperCase().replace(/[^A-Z/]/g, '')
     return ABBREV[upper] ?? word
   }).filter(w => w.length > 0).join(' ')
-  // Remove extra whitespace and stray punctuation
   return clean.replace(/\s+/g, ' ').replace(/[*#&]/g, '').trim()
 }
 
 function buildSearchQuery(description: string, department: string, barcode?: string | null): string {
-  // If we have a barcode, try that first — very specific match
   if (barcode) {
     return `${barcode} product`
   }
@@ -52,7 +86,8 @@ function buildSearchQuery(description: string, department: string, barcode?: str
   return `${cleaned} ${deptHint}`
 }
 
-// Serper.dev API — user sets key in settings or we use default
+// ── Serper.dev image search ──────────────────────────────────────────────────
+
 function getSerperApiKey(): string {
   return localStorage.getItem('liquor-manager-serper-api-key') || (import.meta.env.VITE_SERPER_API_KEY as string) || DEFAULT_SERPER_KEY
 }
@@ -98,7 +133,6 @@ async function serperImageSearch(query: string): Promise<string | null | 'error'
     const data: SerperResponse = await res.json()
     if (!data.images || data.images.length === 0) return null
 
-    // Pick the first image that looks like a product photo (not a tiny icon)
     const img = data.images.find(i => i.imageWidth >= 100 && i.imageHeight >= 100)
     return img?.imageUrl ?? data.images[0]?.imageUrl ?? null
   } catch (err) {
@@ -114,35 +148,48 @@ export async function getCachedImageUrl(itemCode: string): Promise<string | null
   return entry?.imageUrl ?? null
 }
 
+export async function deleteCachedImage(itemCode: string): Promise<void> {
+  await db.imageCache.delete(itemCode)
+}
+
 export async function fetchAndCacheImage(
   itemCode: string,
   description: string,
   department: string,
   barcode?: string | null,
 ): Promise<string | null> {
-  // Check cache first
+  // 1. Check local cache
   const cached = await getCachedImageUrl(itemCode)
-  if (cached !== null) return cached || null // empty string = "no image found"
+  if (cached !== null) return cached || null
 
-  // Try barcode search first, then fall back to name search
+  // 2. Check JARVISmart server cache
+  const jarvisUrl = await getJarvisImage(itemCode)
+  if (jarvisUrl) {
+    await db.imageCache.put({ itemCode, imageUrl: jarvisUrl, fetchedAt: new Date() })
+    return jarvisUrl
+  }
+
+  // 3. Fetch from Serper.dev (barcode first, then name)
   let imageUrl = await serperImageSearch(buildSearchQuery(description, department, barcode))
-
-  // If barcode search failed to find results (not an error), try name-based search
   if (imageUrl === null && barcode) {
     imageUrl = await serperImageSearch(buildSearchQuery(description, department))
   }
 
-  // Don't cache transient errors — only cache real results (found or genuinely not found)
   if (imageUrl === 'error') {
     return null
   }
 
-  // Cache result (empty string = "no image found, don't retry")
+  // Cache locally
   await db.imageCache.put({
     itemCode,
     imageUrl: imageUrl ?? '',
     fetchedAt: new Date(),
   })
+
+  // Push to JARVISmart server for other devices (only if we found an image)
+  if (imageUrl) {
+    pushImageToJarvis(itemCode, imageUrl)
+  }
 
   return imageUrl
 }
@@ -169,7 +216,7 @@ export async function prefetchImages(
   for (const item of items) {
     if (signal?.aborted) break
 
-    // Skip if already cached
+    // Skip if already cached locally
     const existing = await db.imageCache.get(item.itemCode)
     if (existing) {
       done++
@@ -183,9 +230,8 @@ export async function prefetchImages(
     if (url) {
       found++
     } else {
-      // Check if it was cached as empty (not found) vs error (not cached)
       const entry = await db.imageCache.get(item.itemCode)
-      if (!entry) errors++ // wasn't cached = was an error
+      if (!entry) errors++
     }
     onProgress?.({ total: items.length, done, found, errors, current: item.description })
 

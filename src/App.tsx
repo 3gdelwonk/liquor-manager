@@ -105,7 +105,7 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      const stock = await getStockLevels()
+      const stock = await getStockLevels({ limit: 5000 })
       // Filter to liquor, sort by avg daily qty descending (high velocity first)
       const liquorItems = stock
         .filter(s => LIQUOR_DEPT_NAMES.has(s.department))
