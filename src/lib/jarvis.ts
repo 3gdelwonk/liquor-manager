@@ -362,6 +362,26 @@ export async function getItemSales(itemCode: string, days = 90): Promise<ItemSal
   return jarvisFetch<ItemSalesData>(`/api/pos/item-sales/${encodeURIComponent(itemCode)}?days=${days}`);
 }
 
+export interface RecentPriceChange {
+  itemCode: string;
+  barcode: string | null;
+  description: string;
+  department: string;
+  oldPrice: number;
+  newPrice: number;
+  changeDate: string;
+  changedBy: string;
+}
+
+export async function getRecentPriceChanges(since: string, excludeHost = true): Promise<RecentPriceChange[]> {
+  const params = new URLSearchParams({ since });
+  if (excludeHost) params.set('excludeHost', 'true');
+  const raw = await jarvisFetch<{ changes: RecentPriceChange[] } | RecentPriceChange[]>(
+    `/api/pos/recent-price-changes?${params}`
+  );
+  return Array.isArray(raw) ? raw : raw.changes;
+}
+
 const LIQUOR_DEPTS = ['BEER', 'WINE', 'SPIRITS', 'LIQUEURS', 'LIQUOR/MISC'];
 
 export async function getPromotions(): Promise<{ items: LivePromotion[]; count: number; expiringSoonCount: number }> {

@@ -1,14 +1,69 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Search, ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, ScanBarcode } from 'lucide-react'
+import { Plus, Search, ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, ScanBarcode, Bell, X, RefreshCw } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { db, type TrackedItem } from '../lib/db'
-import { searchItems, getItemPrice, getPriceHistory, getItemSales } from '../lib/jarvis'
-import type { PriceCheck, PriceHistoryEntry, ItemSalesData, DailySale } from '../lib/jarvis'
+import { searchItems, getItemPrice, getPriceHistory, getItemSales, getRecentPriceChanges } from '../lib/jarvis'
+import type { PriceCheck, PriceHistoryEntry, ItemSalesData, DailySale, RecentPriceChange } from '../lib/jarvis'
 import ProductImage from './ProductImage'
 import BarcodeScanner from './BarcodeScanner'
 
-// ── Add Item Sheet ──────────────────────────────────────────────────────────
+const LAST_CHECK_KEY = 'liquor-manager-tracking-last-check'
+
+// ── Auto-detection banner ───────────────────────────────────────────────────
+
+function DetectedChanges({ changes, onTrack, onDismiss, onDismissAll }: {
+  changes: RecentPriceChange[]
+  onTrack: (c: RecentPriceChange) => void
+  onDismiss: (itemCode: string) => void
+  onDismissAll: () => void
+}) {
+  if (changes.length === 0) return null
+
+  return (
+    <div className="bg-violet-50 border-b border-violet-100 px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Bell size={14} className="text-violet-600" />
+          <span className="text-xs font-semibold text-violet-700">
+            {changes.length} price change{changes.length !== 1 ? 's' : ''} detected
+          </span>
+        </div>
+        <button onClick={onDismissAll} className="text-[10px] text-violet-400 hover:text-violet-600">
+          Dismiss all
+        </button>
+      </div>
+      <div className="space-y-1.5 max-h-48 overflow-auto">
+        {changes.map(c => (
+          <div key={c.itemCode} className="flex items-center gap-2 bg-white rounded-lg p-2">
+            <ProductImage itemCode={c.itemCode} description={c.description} department={c.department} barcode={c.barcode} size={32} />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-gray-900 truncate">{c.description}</p>
+              <p className="text-[10px] text-gray-400">
+                ${c.oldPrice.toFixed(2)} → <span className="text-violet-600 font-medium">${c.newPrice.toFixed(2)}</span>
+                {' '}&middot; {fmtDate(c.changeDate)} &middot; <span className="text-blue-500">{c.changedBy}</span>
+              </p>
+            </div>
+            <button
+              onClick={() => onTrack(c)}
+              className="px-2.5 py-1 bg-violet-600 text-white text-[10px] font-medium rounded-lg shrink-0"
+            >
+              Track
+            </button>
+            <button
+              onClick={() => onDismiss(c.itemCode)}
+              className="p-1 text-gray-300 hover:text-gray-500 shrink-0"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Add Item Sheet (manual) ─────────────────────────────────────────────────
 
 function AddItemSheet({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState('')
@@ -40,7 +95,6 @@ function AddItemSheet({ onClose }: { onClose: () => void }) {
   function handleScan(code: string) {
     setScannerOpen(false)
     setQuery(code)
-    // Auto-search after scan
     setTimeout(() => {
       setQuery(code)
       searchItems(code, 10).then(res => {
@@ -80,9 +134,10 @@ function AddItemSheet({ onClose }: { onClose: () => void }) {
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-white rounded-t-2xl p-5 space-y-4 pb-safe max-h-[85vh] overflow-auto">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Track Price Change</h2>
+          <h2 className="text-base font-semibold text-gray-900">Manual Track</h2>
           <button onClick={onClose} className="text-gray-400 text-lg leading-none">✕</button>
         </div>
+        <p className="text-xs text-gray-400">For items not auto-detected from Smart Retail price changes</p>
 
         {!selected ? (
           <>
@@ -244,7 +299,6 @@ function TrackingDetail({ item, onBack, onUpdate }: {
           const currentPrice = price.RegSellPrice
           const priceHeld = Math.abs(currentPrice - item.newPrice) < 0.01
           if (!priceHeld) {
-            // Check if host changed it
             const hostChange = history.find(h =>
               h.changedBy === 'host' && new Date(h.date) >= new Date(item.changeDate)
             )
@@ -262,14 +316,13 @@ function TrackingDetail({ item, onBack, onUpdate }: {
             await db.trackedItems.update(item.id!, { currentPrice })
           }
         }
-      } catch { /* API error — show what we have */ }
+      } catch { /* API error */ }
       if (!cancelled) setLoading(false)
     }
     load()
     return () => { cancelled = true }
   }, [item.itemCode, item.id])
 
-  // Compute before/after sales split
   const { beforeSales, afterSales, chartData } = computeSalesImpact(salesData?.dailySales ?? [], item.changeDate)
 
   async function handleComplete() {
@@ -285,7 +338,7 @@ function TrackingDetail({ item, onBack, onUpdate }: {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 overflow-auto">
       <button onClick={onBack} className="text-sm text-violet-600 flex items-center gap-1">
         <ArrowLeft size={14} /> Back to list
       </button>
@@ -362,18 +415,9 @@ function TrackingDetail({ item, onBack, onUpdate }: {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 9, fill: '#9ca3af' }}
-                  interval="preserveStartEnd"
-                  tickLine={false}
-                />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9ca3af' }} interval="preserveStartEnd" tickLine={false} />
                 <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
-                <Tooltip
-                  contentStyle={{ fontSize: 11, borderRadius: 8 }}
-                  formatter={(v: number) => [v.toFixed(1), 'Qty']}
-                  labelFormatter={(l: string) => l}
-                />
+                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: number) => [v.toFixed(1), 'Qty']} labelFormatter={(l: string) => l} />
                 <ReferenceLine x={fmtDate(item.changeDate)} stroke="#7c3aed" strokeDasharray="4 4" label={{ value: 'Change', fontSize: 9, fill: '#7c3aed' }} />
                 <Bar dataKey="qty" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
               </BarChart>
@@ -386,24 +430,9 @@ function TrackingDetail({ item, onBack, onUpdate }: {
       {salesData && (beforeSales.length > 0 || afterSales.length > 0) && (
         <div className="bg-gray-50 rounded-xl p-4 space-y-3">
           <h3 className="text-xs font-semibold text-gray-500 uppercase">Sales Impact</h3>
-          <ComparisonRow
-            label="Avg Daily Qty"
-            before={avg(beforeSales.map(s => s.qty))}
-            after={avg(afterSales.map(s => s.qty))}
-            format={(n) => n.toFixed(1)}
-          />
-          <ComparisonRow
-            label="Avg Daily Revenue"
-            before={avg(beforeSales.map(s => s.revenue))}
-            after={avg(afterSales.map(s => s.revenue))}
-            format={fmtPrice}
-          />
-          <ComparisonRow
-            label="Avg Daily GP"
-            before={avg(beforeSales.map(s => s.gp))}
-            after={avg(afterSales.map(s => s.gp))}
-            format={fmtPrice}
-          />
+          <ComparisonRow label="Avg Daily Qty" before={avg(beforeSales.map(s => s.qty))} after={avg(afterSales.map(s => s.qty))} format={(n) => n.toFixed(1)} />
+          <ComparisonRow label="Avg Daily Revenue" before={avg(beforeSales.map(s => s.revenue))} after={avg(afterSales.map(s => s.revenue))} format={fmtPrice} />
+          <ComparisonRow label="Avg Daily GP" before={avg(beforeSales.map(s => s.gp))} after={avg(afterSales.map(s => s.gp))} format={fmtPrice} />
           {salesData.avgCost > 0 && (
             <ComparisonRow
               label="GP Margin"
@@ -487,12 +516,73 @@ export default function TrackingView() {
   const [selectedItem, setSelectedItem] = useState<TrackedItem | null>(null)
   const [, forceUpdate] = useState(0)
 
+  // Auto-detection state
+  const [detectedChanges, setDetectedChanges] = useState<RecentPriceChange[]>([])
+  const [dismissedCodes, setDismissedCodes] = useState<Set<string>>(new Set())
+  const [checking, setChecking] = useState(false)
+
   const refresh = useCallback(() => forceUpdate(n => n + 1), [])
+
+  // Check for new price changes on mount and when tab becomes visible
+  const checkForChanges = useCallback(async () => {
+    setChecking(true)
+    try {
+      // Default to checking last 7 days, or since last check
+      const lastCheck = localStorage.getItem(LAST_CHECK_KEY)
+      const since = lastCheck || new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+
+      const changes = await getRecentPriceChanges(since, true)
+
+      // Filter out items already tracked and dismissed items
+      const existingCodes = new Set((trackedItems ?? []).map(t => t.itemCode))
+      const newChanges = changes.filter(c =>
+        !existingCodes.has(c.itemCode) && !dismissedCodes.has(c.itemCode)
+      )
+      setDetectedChanges(newChanges)
+
+      // Update last check timestamp
+      localStorage.setItem(LAST_CHECK_KEY, new Date().toISOString().slice(0, 10))
+    } catch {
+      // API not available yet — silently ignore
+    }
+    setChecking(false)
+  }, [trackedItems, dismissedCodes])
+
+  useEffect(() => {
+    checkForChanges()
+  }, []) // Only on mount
+
+  // Track a detected change
+  async function handleTrackDetected(change: RecentPriceChange) {
+    await db.trackedItems.add({
+      itemCode: change.itemCode,
+      barcode: change.barcode,
+      description: change.description,
+      department: change.department,
+      originalPrice: change.oldPrice,
+      newPrice: change.newPrice,
+      changeDate: change.changeDate,
+      notes: `Auto-detected (${change.changedBy})`,
+      status: 'active',
+      currentPrice: change.newPrice,
+      revertedAt: null,
+      createdAt: new Date(),
+    })
+    setDetectedChanges(prev => prev.filter(c => c.itemCode !== change.itemCode))
+  }
+
+  function handleDismiss(itemCode: string) {
+    setDismissedCodes(prev => new Set([...prev, itemCode]))
+    setDetectedChanges(prev => prev.filter(c => c.itemCode !== itemCode))
+  }
+
+  function handleDismissAll() {
+    setDetectedChanges([])
+  }
 
   if (!trackedItems) return <div className="p-4 text-sm text-gray-400">Loading...</div>
 
   if (selectedItem) {
-    // Re-fetch from DB to get latest status
     const current = trackedItems.find(t => t.id === selectedItem.id)
     if (current) {
       return <TrackingDetail item={current} onBack={() => setSelectedItem(null)} onUpdate={refresh} />
@@ -510,6 +600,14 @@ export default function TrackingView() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Auto-detected changes banner */}
+      <DetectedChanges
+        changes={detectedChanges}
+        onTrack={handleTrackDetected}
+        onDismiss={handleDismiss}
+        onDismissAll={handleDismissAll}
+      />
+
       {/* Filter tabs */}
       <div className="flex gap-1 px-4 py-2 border-b border-gray-100 bg-white shrink-0">
         {(['all', 'active', 'reverted', 'completed'] as Filter[]).map(f => (
@@ -525,6 +623,18 @@ export default function TrackingView() {
         ))}
       </div>
 
+      {/* Refresh button */}
+      <div className="flex justify-end px-4 py-1.5">
+        <button
+          onClick={checkForChanges}
+          disabled={checking}
+          className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700"
+        >
+          <RefreshCw size={10} className={checking ? 'animate-spin' : ''} />
+          {checking ? 'Checking...' : 'Check for changes'}
+        </button>
+      </div>
+
       {/* List */}
       <div className="flex-1 overflow-auto">
         {filtered.length === 0 ? (
@@ -533,7 +643,10 @@ export default function TrackingView() {
               <>
                 <AlertTriangle size={32} className="text-gray-300" />
                 <p className="text-sm text-gray-500">No items being tracked</p>
-                <p className="text-xs text-gray-400">Tap + to track a price change on a product</p>
+                <p className="text-xs text-gray-400">
+                  Price changes from Smart Retail will appear automatically.
+                  {'\n'}Tap + to manually track an item.
+                </p>
               </>
             ) : (
               <p className="text-sm text-gray-400">No {filter} items</p>
