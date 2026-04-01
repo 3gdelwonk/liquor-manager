@@ -174,10 +174,13 @@ function ComparisonRow({ label, before, after, format, invertColor }: {
 // PROMO TRACKING MODE
 // ════════════════════════════════════════════════════════════════════════════
 
+const MAX_PROMO_RESULTS = 30
+
 function AddPromoSheet({ onClose }: { onClose: () => void }) {
   const [livePromos, setLivePromos] = useState<LivePromotion[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [saving, setSaving] = useState<string | null>(null)
 
   const existingPromos = useLiveQuery(() => db.trackedPromos.toArray(), [])
@@ -190,11 +193,17 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
       .finally(() => setLoading(false))
   }, [])
 
-  const filtered = useMemo(() => {
-    if (!livePromos) return []
+  // Debounce search to avoid re-rendering hundreds of ProductImages per keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 250)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const { filtered, totalMatches } = useMemo(() => {
+    if (!livePromos) return { filtered: [], totalMatches: 0 }
     let list = livePromos.filter(p => !existingCodes.has(p.itemCode))
-    if (search.trim()) {
-      const words = search.trim().toLowerCase().split(/\s+/)
+    if (debouncedSearch.trim()) {
+      const words = debouncedSearch.trim().toLowerCase().split(/\s+/)
       // Score each item: all-words-match first, then partial matches
       const scored = list.map(p => {
         const desc = p.description.toLowerCase()
@@ -207,7 +216,6 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
       scored.sort((a, b) => {
         if (a.allMatch !== b.allMatch) return a.allMatch ? -1 : 1
         if (a.matchCount !== b.matchCount) return b.matchCount - a.matchCount
-        // Group by base product name (strip pack size suffixes for grouping)
         const baseA = extractBaseName(a.promo.description)
         const baseB = extractBaseName(b.promo.description)
         if (baseA === baseB) return a.promo.description.localeCompare(b.promo.description)
@@ -217,8 +225,9 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
     } else {
       list.sort((a, b) => b.discountPercent - a.discountPercent)
     }
-    return list
-  }, [livePromos, search, existingCodes])
+    const total = list.length
+    return { filtered: list.slice(0, MAX_PROMO_RESULTS), totalMatches: total }
+  }, [livePromos, debouncedSearch, existingCodes])
 
   async function handleTrack(promo: LivePromotion) {
     setSaving(promo.itemCode)
@@ -298,6 +307,11 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
             ))}
+            {totalMatches > MAX_PROMO_RESULTS && (
+              <p className="text-[10px] text-gray-400 text-center py-2">
+                Showing {MAX_PROMO_RESULTS} of {totalMatches} — type more to narrow results
+              </p>
+            )}
           </div>
         )}
       </div>
