@@ -22,18 +22,37 @@ const LAST_CHECK_KEY = 'liquor-manager-tracking-last-check'
 // Shared helpers
 // ════════════════════════════════════════════════════════════════════════════
 
+function parseDate(iso: string): Date {
+  // Handle both "2026-04-01" and "2026-04-01T00:00:00Z" formats
+  const dateOnly = iso.slice(0, 10)
+  return new Date(dateOnly + 'T00:00:00')
+}
+
 function fmtDate(iso: string): string {
-  const d = new Date(iso + 'T00:00:00')
+  const d = parseDate(iso)
+  if (isNaN(d.getTime())) return iso.slice(0, 10)
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
 }
 
 function fmtDateFull(iso: string): string {
-  const d = new Date(iso + 'T00:00:00')
+  const d = parseDate(iso)
+  if (isNaN(d.getTime())) return iso.slice(0, 10)
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function fmtPrice(n: number): string {
   return '$' + n.toFixed(2)
+}
+
+// Strip pack-size suffixes to group singles/4pk/carton together
+const PACK_PATTERNS = /\b(singles?|stubbies|stbs?|cans?|bottles?|btls?|longnecks?|lnk|4\s*p(?:ac)?k|6\s*p(?:ac)?k|10\s*p(?:ac)?k|24\s*p(?:ac)?k|30\s*p(?:ac)?k|ctn|carton|slab|case|\d+\s*x\s*\d+ml|\d+ml|\d+\s*lt?r?)\b/gi
+
+function extractBaseName(description: string): string {
+  return description
+    .replace(PACK_PATTERNS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
 }
 
 function avg(nums: number[]): number {
@@ -170,10 +189,30 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
     if (!livePromos) return []
     let list = livePromos.filter(p => !existingCodes.has(p.itemCode))
     if (search.trim()) {
-      const q = search.trim().toLowerCase()
-      list = list.filter(p => p.description.toLowerCase().includes(q) || p.itemCode.toLowerCase().includes(q))
+      const words = search.trim().toLowerCase().split(/\s+/)
+      // Score each item: all-words-match first, then partial matches
+      const scored = list.map(p => {
+        const desc = p.description.toLowerCase()
+        const code = p.itemCode.toLowerCase()
+        const matchCount = words.filter(w => desc.includes(w) || code.includes(w)).length
+        return { promo: p, matchCount, allMatch: matchCount === words.length }
+      }).filter(s => s.matchCount > 0)
+
+      // Sort: all keywords matched first, then by match count, then group related items together
+      scored.sort((a, b) => {
+        if (a.allMatch !== b.allMatch) return a.allMatch ? -1 : 1
+        if (a.matchCount !== b.matchCount) return b.matchCount - a.matchCount
+        // Group by base product name (strip pack size suffixes for grouping)
+        const baseA = extractBaseName(a.promo.description)
+        const baseB = extractBaseName(b.promo.description)
+        if (baseA === baseB) return a.promo.description.localeCompare(b.promo.description)
+        return 0
+      })
+      list = scored.map(s => s.promo)
+    } else {
+      list.sort((a, b) => b.discountPercent - a.discountPercent)
     }
-    return list.sort((a, b) => b.discountPercent - a.discountPercent)
+    return list
   }, [livePromos, search, existingCodes])
 
   async function handleTrack(promo: LivePromotion) {
