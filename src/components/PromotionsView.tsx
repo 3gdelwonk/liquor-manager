@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, Tag, Search, ScanBarcode, X, AlertTriangle, Calendar } from 'lucide-react'
-import { checkConnection, getPromotions, type LivePromotion } from '../lib/jarvis'
+import { checkConnection, getPromotions, getStockLevels, type LivePromotion } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
+import ProductImage from './ProductImage'
 
 type Segment = 'active' | 'upcoming'
 type DeptFilter = 'all' | 'WINE' | 'BEER' | 'SPIRITS' | 'LIQUEURS' | 'LIQUOR/MISC'
@@ -49,7 +50,9 @@ function PromoCard({ promo, isUpcoming }: { promo: LivePromotion; isUpcoming: bo
     : 0
 
   return (
-    <div className="border border-gray-100 rounded-xl p-3 space-y-1.5">
+    <div className="border border-gray-100 rounded-xl p-3 flex gap-3">
+      <ProductImage itemCode={promo.itemCode} description={promo.description} department={promo.department} size={56} />
+      <div className="flex-1 min-w-0 space-y-1.5">
       {/* Header: name + dept badge */}
       <div className="flex items-center gap-1.5 flex-wrap">
         <p className="text-sm font-medium text-gray-800 truncate flex-1 min-w-0">{promo.description}</p>
@@ -103,6 +106,7 @@ function PromoCard({ promo, isUpcoming }: { promo: LivePromotion; isUpcoming: bo
         <Calendar size={10} />
         <span>{fmtDate(promo.startDate)} → {fmtDateFull(promo.endDate)}</span>
       </div>
+      </div>
     </div>
   )
 }
@@ -113,6 +117,7 @@ export default function PromotionsView() {
   const [error, setError] = useState<string | null>(null)
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
   const [allPromos, setAllPromos] = useState<LivePromotion[] | null>(null)
+  const [barcodeMap, setBarcodeMap] = useState<Map<string, string>>(new Map()) // barcode → itemCode
 
   const [segment, setSegment] = useState<Segment>('active')
   const [deptFilter, setDeptFilter] = useState<DeptFilter>('all')
@@ -131,8 +136,17 @@ export default function PromotionsView() {
         setLoading(false)
         return
       }
-      const data = await getPromotions()
+      const [data, stock] = await Promise.all([
+        getPromotions(),
+        getStockLevels(),
+      ])
       setAllPromos(data.items)
+      // Build barcode → itemCode map from stock data
+      const map = new Map<string, string>()
+      for (const s of stock) {
+        if (s.barcode) map.set(s.barcode, s.itemCode)
+      }
+      setBarcodeMap(map)
       setLastFetch(new Date())
     } catch (err) {
       setError((err as Error).message)
@@ -218,11 +232,12 @@ export default function PromotionsView() {
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [segment, displayed])
 
-  // Handle barcode scan
+  // Handle barcode scan — resolve EAN to itemCode for matching
   const handleScan = useCallback((code: string) => {
     setScannerOpen(false)
-    setSearch(code)
-  }, [])
+    const itemCode = barcodeMap.get(code)
+    setSearch(itemCode ?? code)
+  }, [barcodeMap])
 
   // Expiring soon count from active
   const expiringSoon = useMemo(() => active.filter(p => p.daysLeft <= 2).length, [active])

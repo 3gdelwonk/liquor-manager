@@ -1,8 +1,10 @@
 /// <reference types="vite-plugin-pwa/react" />
-import { Component, useState, type ReactNode } from 'react'
+import { Component, useState, useRef, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { LayoutDashboard, Package, BarChart2, Tag, Upload, Settings, Activity } from 'lucide-react'
 import { clearAllData } from './lib/db'
+import { getStockLevels, LIQUOR_DEPT_NAMES } from './lib/jarvis'
+import { prefetchImages, isImageSearchConfigured, type PrefetchProgress } from './lib/images'
 import Dashboard from './components/Dashboard'
 import ProductsView from './components/ProductsView'
 import PerformanceView from './components/PerformanceView'
@@ -62,8 +64,17 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [jarvisKey, setJarvisKey] = useState(
     () => localStorage.getItem('liquor-manager-jarvis-key') ?? (import.meta.env.VITE_JARVIS_API_KEY as string) ?? ''
   )
+  const [googleApiKey, setGoogleApiKey] = useState(
+    () => localStorage.getItem('liquor-manager-google-api-key') ?? (import.meta.env.VITE_GOOGLE_API_KEY as string) ?? ''
+  )
+  const [googleCseId, setGoogleCseId] = useState(
+    () => localStorage.getItem('liquor-manager-google-cse-id') ?? (import.meta.env.VITE_GOOGLE_CSE_ID as string) ?? ''
+  )
   const [clearing, setClearing] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  const [prefetching, setPrefetching] = useState(false)
+  const [prefetchProgress, setPrefetchProgress] = useState<PrefetchProgress | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   function saveLead() {
     localStorage.setItem('liquor-manager-lead-time', String(leadTime))
@@ -77,6 +88,37 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
       localStorage.removeItem('liquor-manager-jarvis-url')
       localStorage.removeItem('liquor-manager-jarvis-key')
     }
+  }
+
+  function saveGoogle() {
+    if (googleApiKey.trim()) {
+      localStorage.setItem('liquor-manager-google-api-key', googleApiKey.trim())
+      localStorage.setItem('liquor-manager-google-cse-id', googleCseId.trim())
+    } else {
+      localStorage.removeItem('liquor-manager-google-api-key')
+      localStorage.removeItem('liquor-manager-google-cse-id')
+    }
+  }
+
+  async function handlePrefetch() {
+    if (prefetching) {
+      abortRef.current?.abort()
+      setPrefetching(false)
+      return
+    }
+    setPrefetching(true)
+    const controller = new AbortController()
+    abortRef.current = controller
+    try {
+      const stock = await getStockLevels()
+      // Filter to liquor, sort by avg daily qty descending (high velocity first)
+      const liquorItems = stock
+        .filter(s => LIQUOR_DEPT_NAMES.has(s.department))
+        .sort((a, b) => b.avgDayQty - a.avgDayQty)
+        .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department }))
+      await prefetchImages(liquorItems, setPrefetchProgress, controller.signal)
+    } catch { /* aborted or error */ }
+    setPrefetching(false)
   }
 
   async function handleClear() {
@@ -133,6 +175,47 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
           />
           <p className="text-xs text-gray-400">Live Sales tab connection. Use HTTPS URL when on GitHub Pages.</p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700">Google Image Search</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={googleApiKey}
+              onChange={(e) => setGoogleApiKey(e.target.value)}
+              placeholder="Google API Key"
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+            <button onClick={saveGoogle} className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg">Save</button>
+          </div>
+          <input
+            type="text"
+            value={googleCseId}
+            onChange={(e) => setGoogleCseId(e.target.value)}
+            placeholder="Custom Search Engine ID"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+          <p className="text-xs text-gray-400">For product images. Get keys at console.cloud.google.com</p>
+          {isImageSearchConfigured() && (
+            <div className="mt-2">
+              <button
+                onClick={handlePrefetch}
+                className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
+                  prefetching ? 'bg-amber-100 text-amber-700' : 'bg-violet-50 text-violet-600'
+                }`}
+              >
+                {prefetching
+                  ? `${prefetchProgress ? `${prefetchProgress.done}/${prefetchProgress.total} (${prefetchProgress.found} found)` : 'Starting...'} — tap to stop`
+                  : 'Fetch Product Images'}
+              </button>
+              {prefetching && prefetchProgress && (
+                <p className="text-xs text-gray-400 mt-1 truncate">
+                  {prefetchProgress.current}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="border-t border-gray-100 pt-4">

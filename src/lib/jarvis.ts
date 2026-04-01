@@ -99,6 +99,7 @@ interface RawStockItem {
   IsOnReorder: boolean;
   AvgDayQty: number;
   AvgWeekQty: number;
+  barcode: string | null;
 }
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -145,6 +146,7 @@ export interface TopSeller {
 
 export interface StockItem {
   itemCode: string;
+  barcode: string | null;
   description: string;
   department: string;
   departmentCode: number;
@@ -270,6 +272,7 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
   );
   return raw.items.map(s => ({
     itemCode:       s.ItemCode,
+    barcode:        s.barcode ?? null,
     description:    s.ItemDescription.trim(),
     department:     s.DepartmentName,
     departmentCode: s.DepartmentCode,
