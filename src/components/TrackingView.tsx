@@ -22,21 +22,24 @@ const LAST_CHECK_KEY = 'liquor-manager-tracking-last-check'
 // Shared helpers
 // ════════════════════════════════════════════════════════════════════════════
 
-function parseDate(iso: string): Date {
+function parseDate(iso: string | null | undefined): Date {
+  if (!iso) return new Date(NaN)
   // Handle both "2026-04-01" and "2026-04-01T00:00:00Z" formats
   const dateOnly = iso.slice(0, 10)
   return new Date(dateOnly + 'T00:00:00')
 }
 
-function fmtDate(iso: string): string {
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
   const d = parseDate(iso)
-  if (isNaN(d.getTime())) return iso.slice(0, 10)
+  if (isNaN(d.getTime())) return iso.slice(0, 10) || '—'
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
 }
 
-function fmtDateFull(iso: string): string {
+function fmtDateFull(iso: string | null | undefined): string {
+  if (!iso) return '—'
   const d = parseDate(iso)
-  if (isNaN(d.getTime())) return iso.slice(0, 10)
+  if (isNaN(d.getTime())) return iso.slice(0, 10) || '—'
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
@@ -70,8 +73,10 @@ interface ChartPoint {
   gp: number
 }
 
-function getWeekStart(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00')
+function getWeekStart(dateStr: string | null | undefined): string {
+  if (!dateStr) return ''
+  const d = parseDate(dateStr)
+  if (isNaN(d.getTime())) return dateStr.slice(0, 10)
   const day = d.getDay()
   const diff = d.getDate() - day + (day === 0 ? -6 : 1) // Monday start
   d.setDate(diff)
@@ -302,7 +307,8 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
 
 function PromoStatusBadge({ status, endDate }: { status: TrackedPromo['status']; endDate: string }) {
   const today = new Date().toISOString().slice(0, 10)
-  if (status === 'ended' || (status === 'active' && endDate < today)) return (
+  const endDateClean = endDate?.slice(0, 10) ?? ''
+  if (status === 'ended' || (status === 'active' && endDateClean && endDateClean < today)) return (
     <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
       Ended
     </span>
@@ -312,7 +318,7 @@ function PromoStatusBadge({ status, endDate }: { status: TrackedPromo['status'];
       <CheckCircle size={10} /> Reviewed
     </span>
   )
-  const daysLeft = Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000)
+  const daysLeft = Math.ceil((parseDate(endDate).getTime() - Date.now()) / 86400000)
   const color = daysLeft <= 2 ? 'bg-red-100 text-red-600' : daysLeft <= 5 ? 'bg-amber-100 text-amber-600' : 'bg-green-100 text-green-600'
   return (
     <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${color}`}>
@@ -340,7 +346,7 @@ function PromoDetail({ item, onBack, onUpdate }: {
 
         // Auto-mark ended
         const today = new Date().toISOString().slice(0, 10)
-        if (item.status === 'active' && item.endDate < today) {
+        if (item.status === 'active' && item.endDate && item.endDate.slice(0, 10) < today) {
           await db.trackedPromos.update(item.id!, { status: 'ended' })
           onUpdate()
         }
@@ -355,8 +361,9 @@ function PromoDetail({ item, onBack, onUpdate }: {
   const { beforeSales, afterSales, chartData, changeDateLabel } = computeSalesImpact(salesData?.dailySales ?? [], item.startDate, chartMode)
 
   const today = new Date().toISOString().slice(0, 10)
-  const isActive = item.status === 'active' && item.endDate >= today
-  const daysLeft = Math.max(0, Math.ceil((new Date(item.endDate).getTime() - Date.now()) / 86400000))
+  const endDateClean = item.endDate?.slice(0, 10) ?? ''
+  const isActive = item.status === 'active' && endDateClean >= today
+  const daysLeft = Math.max(0, Math.ceil((parseDate(item.endDate).getTime() - Date.now()) / 86400000))
 
   // Cost analysis
   const sellDiscount = item.normalPrice - item.promoPrice
@@ -483,7 +490,7 @@ function PromoDetail({ item, onBack, onUpdate }: {
                 <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
                 <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: number) => [v.toFixed(1), chartMode === 'weekly' ? 'Wk Qty' : 'Qty']} labelFormatter={(l: string) => `Wk of ${l}`} />
                 <ReferenceLine x={changeDateLabel} stroke="#7c3aed" strokeDasharray="4 4" label={{ value: 'Start', fontSize: 9, fill: '#7c3aed' }} />
-                {item.endDate <= today && (
+                {endDateClean && endDateClean <= today && (
                   <ReferenceLine x={chartMode === 'weekly' ? fmtDate(getWeekStart(item.endDate)) : fmtDate(item.endDate)} stroke="#ef4444" strokeDasharray="4 4" label={{ value: 'End', fontSize: 9, fill: '#ef4444' }} />
                 )}
                 <Bar dataKey="qty" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
@@ -548,7 +555,7 @@ function PromoTrackingList() {
   const today = new Date().toISOString().slice(0, 10)
   const promos = trackedPromos.map(p => ({
     ...p,
-    _effectiveStatus: (p.status === 'active' && p.endDate < today) ? 'ended' as const : p.status,
+    _effectiveStatus: (p.status === 'active' && p.endDate && p.endDate.slice(0, 10) < today) ? 'ended' as const : p.status,
   }))
 
   const filtered = promos.filter(p => filter === 'all' || p._effectiveStatus === filter)
