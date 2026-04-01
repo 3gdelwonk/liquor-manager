@@ -6,6 +6,7 @@ import {
   snapshotAgeDays, needsReplenishment,
 } from '../lib/analytics'
 import { getPromotions } from '../lib/jarvis'
+import { useTrackedItemCodes } from '../lib/useTrackedItems'
 import type { StockPerformance } from '../lib/types'
 import { LEAD_TIME_DEFAULT } from '../lib/constants'
 
@@ -33,6 +34,7 @@ export default function PerformanceView() {
   const [deadOpen, setDeadOpen] = useState(false)
   const [matrixTip, setMatrixTip] = useState<number | null>(null)
   const [promoItemCodes, setPromoItemCodes] = useState<Set<string>>(new Set())
+  const trackedItemCodes = useTrackedItemCodes()
 
   useEffect(() => {
     getPromotions().then(data => {
@@ -202,6 +204,7 @@ export default function PerformanceView() {
                         <td className="py-2 px-2 max-w-[140px]">
                           <span className="truncate block">{product.name}</span>
                           {promoItemCodes.has(product.barcode) && <span className="text-[10px] font-medium px-1 py-0.5 rounded bg-violet-100 text-violet-600">PROMO</span>}
+                          {trackedItemCodes.has(product.barcode) && <span className="text-[10px] font-medium px-1 py-0.5 rounded bg-cyan-100 text-cyan-700 ml-1">TRACKING</span>}
                           {replenish && <span className="text-red-500 text-[10px] ml-1">🔴 Reorder</span>}
                           {(ageDays ?? 0) > 7 && <span className="text-amber-500 text-[10px] ml-1">⚠️ Stale</span>}
                         </td>

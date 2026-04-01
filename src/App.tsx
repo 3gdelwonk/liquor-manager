@@ -1,7 +1,7 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, useRef, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Package, BarChart2, Tag, Upload, Settings, Activity } from 'lucide-react'
+import { LayoutDashboard, Package, BarChart2, Tag, Upload, Settings, Activity, Crosshair } from 'lucide-react'
 import { clearAllData } from './lib/db'
 import { getStockLevels, LIQUOR_DEPT_NAMES } from './lib/jarvis'
 import { prefetchImages, isImageSearchConfigured, clearImageCache, type PrefetchProgress } from './lib/images'
@@ -11,6 +11,7 @@ import PerformanceView from './components/PerformanceView'
 import PromotionsView from './components/PromotionsView'
 import ImportView from './components/ImportView'
 import LiveSalesView from './components/LiveSalesView'
+import TrackingView from './components/TrackingView'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
 
@@ -228,15 +229,16 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'home' | 'products' | 'performance' | 'promos' | 'import' | 'live'
+type Tab = 'home' | 'products' | 'performance' | 'promos' | 'import' | 'live' | 'tracking'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'home',        label: 'Home',      icon: <LayoutDashboard size={18} /> },
-  { id: 'products',    label: 'Products',  icon: <Package size={18} /> },
-  { id: 'performance', label: 'Perform',   icon: <BarChart2 size={18} /> },
-  { id: 'promos',      label: 'Promos',    icon: <Tag size={18} /> },
-  { id: 'import',      label: 'Import',    icon: <Upload size={18} /> },
-  { id: 'live',        label: 'Live',      icon: <Activity size={18} /> },
+  { id: 'home',        label: 'Home',      icon: <LayoutDashboard size={16} /> },
+  { id: 'products',    label: 'Products',  icon: <Package size={16} /> },
+  { id: 'performance', label: 'Perform',   icon: <BarChart2 size={16} /> },
+  { id: 'promos',      label: 'Promos',    icon: <Tag size={16} /> },
+  { id: 'tracking',    label: 'Track',     icon: <Crosshair size={16} /> },
+  { id: 'import',      label: 'Import',    icon: <Upload size={16} /> },
+  { id: 'live',        label: 'Live',      icon: <Activity size={16} /> },
 ]
 
 const TAB_TITLES: Record<Tab, string> = {
@@ -244,6 +246,7 @@ const TAB_TITLES: Record<Tab, string> = {
   products:    'Products',
   performance: 'Performance',
   promos:      'Promotions',
+  tracking:    'Price Tracking',
   import:      'Import Data',
   live:        'Live Sales',
 }
@@ -270,6 +273,7 @@ export default function App() {
       case 'performance': return <PerformanceView />
       case 'promos':      return <PromotionsView />
       case 'import':      return <ImportView />
+      case 'tracking':    return <TrackingView />
       case 'live':        return <LiveSalesView />
     }
   }

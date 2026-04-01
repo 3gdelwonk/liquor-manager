@@ -7,6 +7,22 @@ export interface ImageCacheEntry {
   fetchedAt: Date
 }
 
+export interface TrackedItem {
+  id?: number
+  itemCode: string
+  barcode: string | null
+  description: string
+  department: string
+  originalPrice: number
+  newPrice: number
+  changeDate: string       // ISO date "2026-04-01"
+  notes: string
+  status: 'active' | 'reverted' | 'completed'
+  currentPrice: number | null
+  revertedAt: string | null
+  createdAt: Date
+}
+
 class LiquorManagerDB extends Dexie {
   products!: EntityTable<Product, 'id'>
   stockSnapshots!: EntityTable<StockSnapshot, 'id'>
@@ -14,6 +30,7 @@ class LiquorManagerDB extends Dexie {
   promotions!: EntityTable<Promotion, 'id'>
   importLog!: EntityTable<ImportLogEntry, 'id'>
   imageCache!: EntityTable<ImageCacheEntry, 'itemCode'>
+  trackedItems!: EntityTable<TrackedItem, 'id'>
 
   constructor() {
     super('LiquorManagerDB')
@@ -32,18 +49,28 @@ class LiquorManagerDB extends Dexie {
       importLog:      '++id, importedAt, type',
       imageCache:     'itemCode, fetchedAt',
     })
+    this.version(3).stores({
+      products:       '++id, barcode, invoiceCode, category, active',
+      stockSnapshots: '++id, [productId+importedAt], barcode, importBatchId',
+      salesRecords:   '++id, barcode, date, [barcode+date], productId, importBatchId',
+      promotions:     '++id, productId, startDate, endDate',
+      importLog:      '++id, importedAt, type',
+      imageCache:     'itemCode, fetchedAt',
+      trackedItems:   '++id, itemCode, status, changeDate',
+    })
   }
 }
 
 export const db = new LiquorManagerDB()
 
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', [db.products, db.stockSnapshots, db.salesRecords, db.promotions, db.importLog, db.imageCache], async () => {
+  await db.transaction('rw', [db.products, db.stockSnapshots, db.salesRecords, db.promotions, db.importLog, db.imageCache, db.trackedItems], async () => {
     await db.products.clear()
     await db.stockSnapshots.clear()
     await db.salesRecords.clear()
     await db.promotions.clear()
     await db.importLog.clear()
     await db.imageCache.clear()
+    await db.trackedItems.clear()
   })
 }

@@ -304,6 +304,64 @@ export async function getPurchaseOrders(supplier?: string, opts: OrderOptions = 
   return jarvisFetch<PurchaseOrder[]>(`/api/pos/orders?${params}`);
 }
 
+// ── Price & Sales tracking ──────────────────────────────────────────────────
+
+export interface PriceCheck {
+  RegSellPrice: number;
+  PrevSellPrice: number;
+  [key: string]: unknown;
+}
+
+export interface PriceHistoryEntry {
+  date: string;
+  oldPrice: number;
+  newPrice: number;
+  changedBy: string;  // "host" = Metcash/ALM, "system" = scheduled promo, "manual" = POS operator
+  [key: string]: unknown;
+}
+
+export interface DailySale {
+  date: string;
+  qty: number;
+  revenue: number;
+  cost: number;
+  gp: number;
+}
+
+export interface ItemSalesData {
+  itemCode: string;
+  barcode: string;
+  description: string;
+  department: string;
+  currentSellPrice: number;
+  prevSellPrice: number;
+  avgCost: number;
+  period: string;
+  summary: {
+    totalQty: number;
+    totalRevenue: number;
+    daysWithSales: number;
+    avgDailyQty: number;
+    avgDailyRevenue: number;
+  };
+  dailySales: DailySale[];
+}
+
+export async function getItemPrice(itemCode: string): Promise<PriceCheck> {
+  return jarvisFetch<PriceCheck>(`/api/pos/price/${encodeURIComponent(itemCode)}`);
+}
+
+export async function getPriceHistory(itemCode: string, months = 6): Promise<PriceHistoryEntry[]> {
+  const raw = await jarvisFetch<{ history: PriceHistoryEntry[] } | PriceHistoryEntry[]>(
+    `/api/pos/price-history/${encodeURIComponent(itemCode)}?months=${months}`
+  );
+  return Array.isArray(raw) ? raw : raw.history;
+}
+
+export async function getItemSales(itemCode: string, days = 90): Promise<ItemSalesData> {
+  return jarvisFetch<ItemSalesData>(`/api/pos/item-sales/${encodeURIComponent(itemCode)}?days=${days}`);
+}
+
 const LIQUOR_DEPTS = ['BEER', 'WINE', 'SPIRITS', 'LIQUEURS', 'LIQUOR/MISC'];
 
 export async function getPromotions(): Promise<{ items: LivePromotion[]; count: number; expiringSoonCount: number }> {

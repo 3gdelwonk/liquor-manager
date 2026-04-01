@@ -3,6 +3,7 @@ import { Search, ChevronDown, ChevronUp } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 import { getLatestQoh } from '../lib/analytics'
+import { useTrackedItemCodes } from '../lib/useTrackedItems'
 import { CATEGORY_LABELS, CATEGORY_COLORS, CATEGORY_ORDER } from '../lib/constants'
 import type { Product, LiquorCategory } from '../lib/types'
 
@@ -32,7 +33,7 @@ function statusColor(status: string): string {
   return status === 'Low' ? 'text-red-600 bg-red-50' : status === 'Over' ? 'text-amber-600 bg-amber-50' : status === 'Good' ? 'text-green-600 bg-green-50' : 'text-gray-500 bg-gray-50'
 }
 
-function ProductRow({ product, qoh, activePromo }: { product: Product; qoh: number | undefined; activePromo: boolean }) {
+function ProductRow({ product, qoh, activePromo, isTracked }: { product: Product; qoh: number | undefined; activePromo: boolean; isTracked: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const [edit, setEdit] = useState({ ...product })
   const [saving, setSaving] = useState(false)
@@ -66,6 +67,7 @@ function ProductRow({ product, qoh, activePromo }: { product: Product; qoh: numb
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-sm font-medium text-gray-900 truncate">{product.name}</span>
               {activePromo && <span className="text-xs font-medium px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full shrink-0">PROMO</span>}
+              {isTracked && <span className="text-xs font-medium px-1.5 py-0.5 bg-cyan-100 text-cyan-700 rounded-full shrink-0">TRACKING</span>}
             </div>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ background: CATEGORY_COLORS[product.category] + '22', color: CATEGORY_COLORS[product.category] }}>
@@ -136,6 +138,7 @@ export default function ProductsView() {
   const snapshots = useLiveQuery(() => db.stockSnapshots.toArray(), [])
   const promotions = useLiveQuery(() => db.promotions.toArray(), [])
 
+  const trackedItemCodes = useTrackedItemCodes()
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState<LiquorCategory | 'all'>('all')
   const [sort, setSort] = useState<SortKey>('name')
@@ -233,13 +236,14 @@ export default function ProductsView() {
                 product={p}
                 qoh={p.id ? latestQoh.get(p.id) : undefined}
                 activePromo={!!p.id && activePromoIds.has(p.id)}
+                isTracked={trackedItemCodes.has(p.barcode)}
               />
             ))}
           </div>
         ))}
         {/* Any category not in CATEGORY_ORDER */}
         {filtered.filter(p => !CATEGORY_ORDER.includes(p.category)).map(p => (
-          <ProductRow key={p.id} product={p} qoh={p.id ? latestQoh.get(p.id) : undefined} activePromo={!!p.id && activePromoIds.has(p.id)} />
+          <ProductRow key={p.id} product={p} qoh={p.id ? latestQoh.get(p.id) : undefined} activePromo={!!p.id && activePromoIds.has(p.id)} isTracked={trackedItemCodes.has(p.barcode)} />
         ))}
         {filtered.length === 0 && <p className="text-center text-sm text-gray-400 py-8">No products match filters</p>}
         <div className="h-8" />

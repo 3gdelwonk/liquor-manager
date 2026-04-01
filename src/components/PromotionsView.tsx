@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, Tag, Search, ScanBarcode, X, AlertTriangle, Calendar } from 'lucide-react'
 import { checkConnection, getPromotions, getStockLevels, type LivePromotion } from '../lib/jarvis'
+import { useTrackedItemCodes } from '../lib/useTrackedItems'
 import BarcodeScanner from './BarcodeScanner'
 import ProductImage from './ProductImage'
 
@@ -42,7 +43,7 @@ function marginColor(m: number) {
   return 'text-green-600'
 }
 
-function PromoCard({ promo, isUpcoming }: { promo: LivePromotion; isUpcoming: boolean }) {
+function PromoCard({ promo, isUpcoming, isTracked }: { promo: LivePromotion; isUpcoming: boolean; isTracked?: boolean }) {
   const badgeClass = DEPT_COLORS[promo.department] ?? 'bg-gray-100 text-gray-600'
 
   const daysUntilStart = isUpcoming
@@ -59,6 +60,7 @@ function PromoCard({ promo, isUpcoming }: { promo: LivePromotion; isUpcoming: bo
         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${badgeClass}`}>
           {promo.department}
         </span>
+        {isTracked && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-cyan-100 text-cyan-700">TRACKING</span>}
       </div>
 
       {/* SELL row */}
@@ -119,6 +121,7 @@ export default function PromotionsView() {
   const [allPromos, setAllPromos] = useState<LivePromotion[] | null>(null)
   const [barcodeMap, setBarcodeMap] = useState<Map<string, string>>(new Map()) // barcode → itemCode
 
+  const trackedItemCodes = useTrackedItemCodes()
   const [segment, setSegment] = useState<Segment>('active')
   const [deptFilter, setDeptFilter] = useState<DeptFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('discount')
@@ -408,14 +411,14 @@ export default function PromotionsView() {
               </div>
               <div className="space-y-2">
                 {items.map(p => (
-                  <PromoCard key={p.itemCode} promo={p} isUpcoming />
+                  <PromoCard key={p.itemCode} promo={p} isUpcoming isTracked={trackedItemCodes.has(p.itemCode)} />
                 ))}
               </div>
             </div>
           ))
         ) : (
           displayed.map(p => (
-            <PromoCard key={p.itemCode} promo={p} isUpcoming={false} />
+            <PromoCard key={p.itemCode} promo={p} isUpcoming={false} isTracked={trackedItemCodes.has(p.itemCode)} />
           ))
         )}
       </div>
