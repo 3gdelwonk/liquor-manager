@@ -1029,6 +1029,7 @@ function PromoTrackingList() {
   const [selectedPromo, setSelectedPromo] = useState<TrackedPromo | null>(null)
   const [filter, setFilter] = useState<'all' | 'active' | 'ended' | 'completed'>('all')
   const [reordering, setReordering] = useState(false)
+  const [listSearch, setListSearch] = useState('')
   const [, forceUpdate] = useState(0)
 
   const refresh = useCallback(() => forceUpdate(n => n + 1), [])
@@ -1049,7 +1050,17 @@ function PromoTrackingList() {
   }))
 
   const sorted = sortByOrder(promos)
-  const filtered = sorted.filter(p => filter === 'all' || p._effectiveStatus === filter)
+  let filtered = sorted.filter(p => filter === 'all' || p._effectiveStatus === filter)
+
+  // Search within tracked promos
+  if (listSearch.trim()) {
+    const words = listSearch.trim().toLowerCase().split(/\s+/)
+    filtered = filtered.filter(p => {
+      const haystack = `${p.description} ${p.itemCode} ${(p.tags ?? []).join(' ')} ${p.notes}`.toLowerCase()
+      return words.every(w => haystack.includes(w))
+    })
+  }
+
   const counts = {
     all: promos.length,
     active: promos.filter(p => p._effectiveStatus === 'active').length,
@@ -1094,6 +1105,26 @@ function PromoTrackingList() {
         </button>
       </div>
 
+      {/* Search bar */}
+      {promos.length > 0 && (
+        <div className="px-4 py-1.5 border-b border-gray-100 shrink-0">
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
+            <input
+              value={listSearch}
+              onChange={e => setListSearch(e.target.value)}
+              placeholder="Search tracked promos..."
+              className="w-full pl-8 pr-3 py-1.5 bg-gray-50 border border-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white"
+            />
+            {listSearch && (
+              <button onClick={() => setListSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* List */}
       <div className="flex-1 overflow-auto">
         {filtered.length === 0 ? (
@@ -1106,6 +1137,8 @@ function PromoTrackingList() {
                   Tap + to select promotions from live host/system promos
                 </p>
               </>
+            ) : listSearch.trim() ? (
+              <p className="text-sm text-gray-400">No results for "{listSearch}"</p>
             ) : (
               <p className="text-sm text-gray-400">No {filter === 'completed' ? 'reviewed' : filter} promotions</p>
             )}
@@ -1632,6 +1665,7 @@ function PriceTrackingList() {
   const [showAdd, setShowAdd] = useState(false)
   const [selectedItem, setSelectedItem] = useState<TrackedItem | null>(null)
   const [reordering, setReordering] = useState(false)
+  const [listSearch, setListSearch] = useState('')
   const [, forceUpdate] = useState(0)
 
   // Auto-detection state
@@ -1703,7 +1737,16 @@ function PriceTrackingList() {
   }
 
   const sorted = sortByOrder(trackedItems)
-  const filtered = sorted.filter(t => filter === 'all' || t.status === filter)
+  let filtered = sorted.filter(t => filter === 'all' || t.status === filter)
+
+  if (listSearch.trim()) {
+    const words = listSearch.trim().toLowerCase().split(/\s+/)
+    filtered = filtered.filter(t => {
+      const haystack = `${t.description} ${t.itemCode} ${(t.tags ?? []).join(' ')} ${t.notes}`.toLowerCase()
+      return words.every(w => haystack.includes(w))
+    })
+  }
+
   const counts = {
     all: trackedItems.length,
     active: trackedItems.filter(t => t.status === 'active').length,
@@ -1756,12 +1799,28 @@ function PriceTrackingList() {
         </button>
       </div>
 
-      {/* Refresh button */}
-      <div className="flex justify-end px-4 py-1.5">
+      {/* Search + refresh */}
+      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-100 shrink-0">
+        {trackedItems.length > 0 && (
+          <div className="relative flex-1">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
+            <input
+              value={listSearch}
+              onChange={e => setListSearch(e.target.value)}
+              placeholder="Search tracked items..."
+              className="w-full pl-8 pr-3 py-1.5 bg-gray-50 border border-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white"
+            />
+            {listSearch && (
+              <button onClick={() => setListSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        )}
         <button
           onClick={checkForChanges}
           disabled={checking}
-          className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700"
+          className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700 shrink-0"
         >
           <RefreshCw size={10} className={checking ? 'animate-spin' : ''} />
           {checking ? 'Checking...' : 'Check for changes'}
@@ -1781,6 +1840,8 @@ function PriceTrackingList() {
                   {'\n'}Tap + to manually track an item.
                 </p>
               </>
+            ) : listSearch.trim() ? (
+              <p className="text-sm text-gray-400">No results for "{listSearch}"</p>
             ) : (
               <p className="text-sm text-gray-400">No {filter} items</p>
             )}
