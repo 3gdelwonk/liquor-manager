@@ -373,13 +373,59 @@ export interface RecentPriceChange {
   changedBy: string;
 }
 
+interface RawPriceChangeItem {
+  itemCode: string;
+  barcode: string | null;
+  description: string;
+  department: string;
+  date: string;
+  changedBy: string;
+  source: string;
+  prevSellPrice: number;
+  currentRegSellPrice: number;
+  sellChanged: boolean;
+  // Additional fields we don't map
+  [key: string]: unknown;
+}
+
 export async function getRecentPriceChanges(since: string, excludeHost = true): Promise<RecentPriceChange[]> {
   const params = new URLSearchParams({ since });
   if (excludeHost) params.set('excludeHost', 'true');
-  const raw = await jarvisFetch<{ changes: RecentPriceChange[] } | RecentPriceChange[]>(
+  const raw = await jarvisFetch<{ items: RawPriceChangeItem[] } | { changes: RecentPriceChange[] } | RecentPriceChange[]>(
     `/api/pos/recent-price-changes?${params}`
   );
-  return Array.isArray(raw) ? raw : raw.changes;
+
+  // Handle different response shapes from the API
+  if (Array.isArray(raw)) return raw;
+  if ('changes' in raw) return raw.changes;
+
+  // Map raw items to our interface, filter to actual sell price changes
+  // Check both sellChanged flag AND actual price difference (prevSellPrice vs currentRegSellPrice)
+  const mapped = raw.items
+    .filter(item => {
+      const priceChanged = item.sellChanged || Math.abs(item.prevSellPrice - item.currentRegSellPrice) > 0.001
+      const sourceOk = excludeHost ? item.source === 'manual' : true
+      return priceChanged && sourceOk
+    })
+    .map(item => ({
+      itemCode: item.itemCode,
+      barcode: item.barcode,
+      description: item.description,
+      department: item.department,
+      oldPrice: item.prevSellPrice,
+      newPrice: item.currentRegSellPrice,
+      changeDate: item.date,
+      changedBy: item.changedBy,
+    }));
+
+  // Deduplicate by itemCode, keep the most recent entry
+  const seen = new Map<string, RecentPriceChange>();
+  for (const item of mapped) {
+    if (!seen.has(item.itemCode) || new Date(item.changeDate) > new Date(seen.get(item.itemCode)!.changeDate)) {
+      seen.set(item.itemCode, item);
+    }
+  }
+  return Array.from(seen.values());
 }
 
 const LIQUOR_DEPTS = ['BEER', 'WINE', 'SPIRITS', 'LIQUEURS', 'LIQUOR/MISC'];

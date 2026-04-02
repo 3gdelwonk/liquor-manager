@@ -9,13 +9,15 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContaine
 import { db, type TrackedItem, type TrackedPromo } from '../lib/db'
 import {
   searchItems, getItemPrice, getPriceHistory, getItemSales,
-  getPromotions
+  getRecentPriceChanges, getPromotions, LIQUOR_DEPT_NAMES
 } from '../lib/jarvis'
 import type { PriceCheck, PriceHistoryEntry, ItemSalesData, DailySale, LivePromotion } from '../lib/jarvis'
 import ProductImage from './ProductImage'
 import BarcodeScanner from './BarcodeScanner'
 
 type TrackMode = 'host' | 'user'
+
+const LAST_CHECK_KEY = 'liquor-manager-tracking-last-check'
 
 // ════════════════════════════════════════════════════════════════════════════
 // Shared helpers
@@ -1220,13 +1222,13 @@ function PromoTrackingList() {
 // PRICE CHANGE TRACKING MODE (existing)
 // ════════════════════════════════════════════════════════════════════════════
 
-function DetectedPromos({ promos, onTrack, onDismiss, onDismissAll }: {
-  promos: LivePromotion[]
-  onTrack: (p: LivePromotion) => void
+function DetectedChanges({ items, onTrack, onDismiss, onDismissAll }: {
+  items: { itemCode: string; barcode: string | null; description: string; department: string; oldPrice: number; newPrice: number; changeDate: string; source: string }[]
+  onTrack: (item: typeof items[0]) => void
   onDismiss: (itemCode: string) => void
   onDismissAll: () => void
 }) {
-  if (promos.length === 0) return null
+  if (items.length === 0) return null
 
   return (
     <div className="bg-violet-50 border-b border-violet-100 px-4 py-3 space-y-2">
@@ -1234,7 +1236,7 @@ function DetectedPromos({ promos, onTrack, onDismiss, onDismissAll }: {
         <div className="flex items-center gap-2">
           <Bell size={14} className="text-violet-600" />
           <span className="text-xs font-semibold text-violet-700">
-            {promos.length} new promo{promos.length !== 1 ? 's' : ''} available
+            {items.length} change{items.length !== 1 ? 's' : ''} detected
           </span>
         </div>
         <button onClick={onDismissAll} className="text-[10px] text-violet-400 hover:text-violet-600">
@@ -1242,25 +1244,25 @@ function DetectedPromos({ promos, onTrack, onDismiss, onDismissAll }: {
         </button>
       </div>
       <div className="space-y-1.5 max-h-48 overflow-auto">
-        {promos.map(p => (
-          <div key={p.itemCode} className="flex items-center gap-2 bg-white rounded-lg p-2">
-            <ProductImage itemCode={p.itemCode} description={p.description} department={p.department} size={32} />
+        {items.map(item => (
+          <div key={item.itemCode} className="flex items-center gap-2 bg-white rounded-lg p-2">
+            <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={32} />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-gray-900 truncate">{p.description}</p>
+              <p className="text-xs font-medium text-gray-900 truncate">{item.description}</p>
               <p className="text-[10px] text-gray-400">
-                {fmtPrice(p.normalPrice)} → <span className="text-green-600 font-medium">{fmtPrice(p.promoPrice)}</span>
-                {' '}&middot; <span className="text-green-600">{p.discountPercent.toFixed(0)}% off</span>
-                {' '}&middot; {fmtDate(p.startDate)} → {fmtDate(p.endDate)}
+                {fmtPrice(item.oldPrice)} → <span className="text-violet-600 font-medium">{fmtPrice(item.newPrice)}</span>
+                {' '}&middot; {fmtDate(item.changeDate)}
               </p>
+              <p className="text-[9px] text-blue-500">{item.source}</p>
             </div>
             <button
-              onClick={() => onTrack(p)}
+              onClick={() => onTrack(item)}
               className="px-2.5 py-1 bg-violet-600 text-white text-[10px] font-medium rounded-lg shrink-0"
             >
               Track
             </button>
             <button
-              onClick={() => onDismiss(p.itemCode)}
+              onClick={() => onDismiss(item.itemCode)}
               className="p-1 text-gray-300 hover:text-gray-500 shrink-0"
             >
               <X size={12} />
@@ -1667,66 +1669,112 @@ function PriceTrackingList() {
   const [listSearch, setListSearch] = useState('')
   const [, forceUpdate] = useState(0)
 
-  // Auto-detection: poll /promotions for new promos not yet tracked
-  const [detectedPromos, setDetectedPromos] = useState<LivePromotion[]>([])
+  // Auto-detection: poll price changes (user-made) + user promos on liquor items
+  interface DetectedItem {
+    itemCode: string
+    barcode: string | null
+    description: string
+    department: string
+    oldPrice: number
+    newPrice: number
+    changeDate: string
+    source: string  // "price change (manual)" or "promo (15% off)"
+  }
+
+  const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
   const [dismissedCodes, setDismissedCodes] = useState<Set<string>>(new Set())
   const [checking, setChecking] = useState(false)
 
   const refresh = useCallback(() => forceUpdate(n => n + 1), [])
 
-  // Also check against tracked promos in Host mode to avoid duplicates
   const trackedPromoCodes = useLiveQuery(
     () => db.trackedPromos.toArray().then(items => new Set(items.map(i => i.itemCode))), []
   )
 
-  const checkForNewPromos = useCallback(async () => {
+  const checkForChanges = useCallback(async () => {
     setChecking(true)
+    const existingCodes = new Set((trackedItems ?? []).map(t => t.itemCode))
+    const hostCodes = trackedPromoCodes ?? new Set<string>()
+    const allExisting = new Set([...existingCodes, ...hostCodes])
+    const results: DetectedItem[] = []
+    const seen = new Set<string>()
+
+    // 1. Poll user price changes (excludeHost=true → only manual/user changes)
+    try {
+      const lastCheck = localStorage.getItem(LAST_CHECK_KEY)
+      const since = lastCheck || new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
+      const changes = await getRecentPriceChanges(since, true)
+      for (const c of changes) {
+        if (LIQUOR_DEPT_NAMES.has(c.department) && !allExisting.has(c.itemCode) && !dismissedCodes.has(c.itemCode) && !seen.has(c.itemCode)) {
+          seen.add(c.itemCode)
+          results.push({
+            itemCode: c.itemCode,
+            barcode: c.barcode,
+            description: c.description,
+            department: c.department,
+            oldPrice: c.oldPrice,
+            newPrice: c.newPrice,
+            changeDate: c.changeDate,
+            source: `Price change (${c.changedBy})`,
+          })
+        }
+      }
+      localStorage.setItem(LAST_CHECK_KEY, new Date().toISOString().slice(0, 10))
+    } catch { /* API not available */ }
+
+    // 2. Poll promotions for user-created promos (non-host scheduled by staff)
     try {
       const data = await getPromotions()
-      const existingItemCodes = new Set((trackedItems ?? []).map(t => t.itemCode))
-      const existingPromoCodes = trackedPromoCodes ?? new Set<string>()
+      for (const p of data.items) {
+        if (!allExisting.has(p.itemCode) && !dismissedCodes.has(p.itemCode) && !seen.has(p.itemCode)) {
+          seen.add(p.itemCode)
+          results.push({
+            itemCode: p.itemCode,
+            barcode: null,
+            description: p.description,
+            department: p.department,
+            oldPrice: p.normalPrice,
+            newPrice: p.promoPrice,
+            changeDate: p.startDate,
+            source: `Promo (${p.discountPercent.toFixed(0)}% off)`,
+          })
+        }
+      }
+    } catch { /* API not available */ }
 
-      const newPromos = data.items.filter(p =>
-        !existingItemCodes.has(p.itemCode) &&
-        !existingPromoCodes.has(p.itemCode) &&
-        !dismissedCodes.has(p.itemCode)
-      )
-      setDetectedPromos(newPromos)
-    } catch {
-      // API not available yet
-    }
+    setDetectedItems(results)
     setChecking(false)
   }, [trackedItems, trackedPromoCodes, dismissedCodes])
 
   useEffect(() => {
-    checkForNewPromos()
+    checkForChanges()
   }, [])
 
-  async function handleTrackDetectedPromo(promo: LivePromotion) {
+  async function handleTrackDetected(item: DetectedItem) {
     await db.trackedItems.add({
-      itemCode: promo.itemCode,
-      barcode: null,
-      description: promo.description,
-      department: promo.department,
-      originalPrice: promo.normalPrice,
-      newPrice: promo.promoPrice,
-      changeDate: promo.startDate,
-      notes: `From promo (${promo.discountPercent.toFixed(0)}% off)`,
+      itemCode: item.itemCode,
+      barcode: item.barcode,
+      description: item.description,
+      department: item.department,
+      originalPrice: item.oldPrice,
+      newPrice: item.newPrice,
+      changeDate: item.changeDate,
+      notes: item.source,
       status: 'active',
-      currentPrice: promo.promoPrice,
+      currentPrice: item.newPrice,
       revertedAt: null,
       createdAt: new Date(),
     })
-    setDetectedPromos(prev => prev.filter(p => p.itemCode !== promo.itemCode))
+    setDetectedItems(prev => prev.filter(d => d.itemCode !== item.itemCode))
   }
 
   function handleDismiss(itemCode: string) {
     setDismissedCodes(prev => new Set([...prev, itemCode]))
-    setDetectedPromos(prev => prev.filter(p => p.itemCode !== itemCode))
+    setDetectedItems(prev => prev.filter(d => d.itemCode !== itemCode))
   }
 
   function handleDismissAll() {
-    setDetectedPromos([])
+    setDetectedItems([])
   }
 
   if (!trackedItems) return <div className="p-4 text-sm text-gray-400">Loading...</div>
@@ -1768,10 +1816,10 @@ function PriceTrackingList() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Auto-detected promos banner */}
-      <DetectedPromos
-        promos={detectedPromos}
-        onTrack={handleTrackDetectedPromo}
+      {/* Auto-detected changes banner */}
+      <DetectedChanges
+        items={detectedItems}
+        onTrack={handleTrackDetected}
         onDismiss={handleDismiss}
         onDismissAll={handleDismissAll}
       />
@@ -1819,12 +1867,12 @@ function PriceTrackingList() {
           </div>
         )}
         <button
-          onClick={checkForNewPromos}
+          onClick={checkForChanges}
           disabled={checking}
           className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700 shrink-0"
         >
           <RefreshCw size={10} className={checking ? 'animate-spin' : ''} />
-          {checking ? 'Checking...' : 'Check for new promos'}
+          {checking ? 'Checking...' : 'Check for changes'}
         </button>
       </div>
 
@@ -1961,7 +2009,7 @@ export default function TrackingView() {
       <p className="text-[10px] text-gray-400 text-center px-4 pb-1">
         {mode === 'host'
           ? 'Track host & system promotions — monitor sales performance during promo periods'
-          : 'Your tracked items — auto-detects new promos from the system'}
+          : 'Auto-detects user price changes & promotions on liquor products'}
       </p>
 
       {/* Content */}
