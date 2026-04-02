@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { RefreshCw, WifiOff, TrendingUp, Search } from 'lucide-react'
+import { RefreshCw, WifiOff, TrendingUp, Search, ScanBarcode } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import {
   checkConnection, getDepartmentBreakdown, getTopSellers, getStockLevels,
   LIQUOR_DEPT_CODES, LIQUOR_DEPT_NAMES,
   type DepartmentBreakdown, type TopSeller, type StockItem,
 } from '../lib/jarvis'
+import { useProductCodeLookup } from '../lib/useProductCodes'
+import BarcodeScanner from './BarcodeScanner'
 
 type LiveTab = 'sales' | 'items' | 'stock'
 type Period = 'today' | 'week'
@@ -40,6 +42,14 @@ export default function LiveSalesView() {
   const [topSellers, setTopSellers] = useState<TopSeller[] | null>(null)
   const [stockItems, setStockItems] = useState<StockItem[] | null>(null)
   const [stockSearch, setStockSearch] = useState('')
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const { getOrderCode, resolveCode } = useProductCodeLookup()
+
+  const handleScan = useCallback((code: string) => {
+    setScannerOpen(false)
+    setStockSearch(resolveCode(code))
+    setLiveTab('stock')
+  }, [resolveCode])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -111,15 +121,30 @@ export default function LiveSalesView() {
     [stockItems]
   )
 
+  // Map itemCode → barcode from stock data (for cross-referencing top sellers with order codes)
+  const itemCodeToBarcode = useMemo(() => {
+    const map = new Map<string, string>()
+    if (stockItems) {
+      for (const s of stockItems) {
+        if (s.barcode) map.set(s.itemCode, s.barcode)
+      }
+    }
+    return map
+  }, [stockItems])
+
   const filteredStock = useMemo(
     () => stockSearch
-      ? liquorStock.filter(s =>
-          s.description.toLowerCase().includes(stockSearch.toLowerCase()) ||
-          s.itemCode.toLowerCase().includes(stockSearch.toLowerCase()) ||
-          s.department.toLowerCase().includes(stockSearch.toLowerCase())
-        )
+      ? liquorStock.filter(s => {
+          const q = stockSearch.toLowerCase()
+          const orderCode = getOrderCode(s.barcode)
+          return s.description.toLowerCase().includes(q) ||
+            s.itemCode.toLowerCase().includes(q) ||
+            s.department.toLowerCase().includes(q) ||
+            (s.barcode && s.barcode.includes(stockSearch)) ||
+            (orderCode && orderCode.toLowerCase().includes(q))
+        })
       : liquorStock,
-    [liquorStock, stockSearch]
+    [liquorStock, stockSearch, getOrderCode]
   )
 
   // ── Status banner ───────────────────────────────────────────────────────────
@@ -351,8 +376,9 @@ export default function LiveSalesView() {
                     <span className="text-xs text-gray-400 w-6 text-right shrink-0">{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-gray-800 truncate">{item.description}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-xs text-gray-400">{item.itemCode}</span>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        {(() => { const oc = getOrderCode(itemCodeToBarcode.get(item.itemCode) ?? null); return oc ? <span className="text-[10px] text-gray-400 font-mono">#{oc}</span> : null })()}
+                        <span className="text-[10px] text-gray-300 font-mono">{item.itemCode}</span>
                         <span
                           className="text-xs px-1.5 py-0.5 rounded font-medium"
                           style={{
@@ -382,14 +408,23 @@ export default function LiveSalesView() {
         {/* ── Stock / QOH tab ───────────────────────────────────────────────── */}
         {liveTab === 'stock' && (
           <div className="p-4 pb-8 space-y-3">
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                value={stockSearch}
-                onChange={e => setStockSearch(e.target.value)}
-                placeholder="Search liquor stock…"
-                className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={stockSearch}
+                  onChange={e => setStockSearch(e.target.value)}
+                  placeholder="Search name, barcode, order code…"
+                  className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </div>
+              <button
+                onClick={() => setScannerOpen(true)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50"
+                title="Scan barcode or code"
+              >
+                <ScanBarcode size={18} />
+              </button>
             </div>
             {liquorStock.length > 0 && (
               <p className="text-xs text-gray-400">
@@ -406,8 +441,8 @@ export default function LiveSalesView() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-gray-800 truncate">{item.description}</p>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                          <span className="text-xs text-gray-400 font-mono">{item.itemCode}</span>
-                          {item.barcode && <span className="text-xs text-gray-300 font-mono">· {item.barcode}</span>}
+                          {(() => { const oc = getOrderCode(item.barcode); return oc ? <span className="text-[10px] text-gray-400 font-mono">#{oc}</span> : null })()}
+                          {item.barcode && <span className="text-[10px] text-gray-300 font-mono">{item.barcode}</span>}
                           <span
                             className="text-xs px-1.5 py-0.5 rounded font-medium"
                             style={{
@@ -443,6 +478,7 @@ export default function LiveSalesView() {
         )}
 
       </div>
+      <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
     </div>
   )
 }

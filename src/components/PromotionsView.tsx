@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, Tag, Search, ScanBarcode, X, AlertTriangle, Calendar } from 'lucide-react'
 import { checkConnection, getPromotions, getStockLevels, type LivePromotion } from '../lib/jarvis'
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
+import { useProductCodeLookup } from '../lib/useProductCodes'
 import BarcodeScanner from './BarcodeScanner'
 import ProductImage from './ProductImage'
 
@@ -43,7 +44,7 @@ function marginColor(m: number) {
   return 'text-green-600'
 }
 
-function PromoCard({ promo, isUpcoming, isTracked }: { promo: LivePromotion; isUpcoming: boolean; isTracked?: boolean }) {
+function PromoCard({ promo, isUpcoming, isTracked, orderCode }: { promo: LivePromotion; isUpcoming: boolean; isTracked?: boolean; orderCode?: string | null }) {
   const badgeClass = DEPT_COLORS[promo.department] ?? 'bg-gray-100 text-gray-600'
 
   const daysUntilStart = isUpcoming
@@ -64,8 +65,9 @@ function PromoCard({ promo, isUpcoming, isTracked }: { promo: LivePromotion; isU
       </div>
 
       {/* Codes */}
-      <div className="flex items-center gap-2 text-[10px] text-gray-400">
-        <span className="font-mono">{promo.itemCode}</span>
+      <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono">
+        {orderCode && <span>#{orderCode}</span>}
+        <span className="text-gray-300">{promo.itemCode}</span>
       </div>
 
       {/* SELL row */}
@@ -127,6 +129,7 @@ export default function PromotionsView() {
   const [barcodeMap, setBarcodeMap] = useState<Map<string, string>>(new Map()) // barcode → itemCode
 
   const trackedItemCodes = useTrackedItemCodes()
+  const { getOrderCode, resolveCode } = useProductCodeLookup()
   const [segment, setSegment] = useState<Segment>('active')
   const [deptFilter, setDeptFilter] = useState<DeptFilter>('all')
   const [sortKey, setSortKey] = useState<SortKey>('discount')
@@ -240,12 +243,20 @@ export default function PromotionsView() {
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [segment, displayed])
 
-  // Handle barcode scan — resolve EAN to itemCode for matching
+  // Reverse map: itemCode → barcode (for order code lookups on promo cards)
+  const itemCodeToBarcode = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const [bc, ic] of barcodeMap) map.set(ic, bc)
+    return map
+  }, [barcodeMap])
+
+  // Handle barcode scan — resolve any code type to search term
   const handleScan = useCallback((code: string) => {
     setScannerOpen(false)
-    const itemCode = barcodeMap.get(code)
-    setSearch(itemCode ?? code)
-  }, [barcodeMap])
+    const resolved = resolveCode(code)
+    const itemCode = barcodeMap.get(resolved)
+    setSearch(itemCode ?? resolved)
+  }, [barcodeMap, resolveCode])
 
   // Expiring soon count from active
   const expiringSoon = useMemo(() => active.filter(p => p.daysLeft <= 2).length, [active])
@@ -416,14 +427,14 @@ export default function PromotionsView() {
               </div>
               <div className="space-y-2">
                 {items.map(p => (
-                  <PromoCard key={p.itemCode} promo={p} isUpcoming isTracked={trackedItemCodes.has(p.itemCode)} />
+                  <PromoCard key={p.itemCode} promo={p} isUpcoming isTracked={trackedItemCodes.has(p.itemCode)} orderCode={getOrderCode(itemCodeToBarcode.get(p.itemCode) ?? null)} />
                 ))}
               </div>
             </div>
           ))
         ) : (
           displayed.map(p => (
-            <PromoCard key={p.itemCode} promo={p} isUpcoming={false} isTracked={trackedItemCodes.has(p.itemCode)} />
+            <PromoCard key={p.itemCode} promo={p} isUpcoming={false} isTracked={trackedItemCodes.has(p.itemCode)} orderCode={getOrderCode(itemCodeToBarcode.get(p.itemCode) ?? null)} />
           ))
         )}
       </div>

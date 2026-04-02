@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { Search, ChevronDown, ChevronUp, ScanBarcode } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import BarcodeScanner from './BarcodeScanner'
+import { useProductCodeLookup } from '../lib/useProductCodes'
 import { db } from '../lib/db'
 import { getLatestQoh } from '../lib/analytics'
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
@@ -74,7 +75,8 @@ function ProductRow({ product, qoh, activePromo, isTracked }: { product: Product
               <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ background: CATEGORY_COLORS[product.category] + '22', color: CATEGORY_COLORS[product.category] }}>
                 {CATEGORY_LABELS[product.category]}
               </span>
-              <span className="text-xs text-gray-400 font-mono">{product.invoiceCode || product.barcode}</span>
+              {product.itemNumber && <span className="text-[10px] text-gray-400 font-mono">#{product.itemNumber}</span>}
+              <span className="text-[10px] text-gray-300 font-mono">{product.barcode}</span>
               {product.abv && <span className="text-xs text-gray-400">{product.abv}%</span>}
               {product.bottleSize && <span className="text-xs text-gray-400">{product.bottleSize}ml</span>}
             </div>
@@ -150,11 +152,12 @@ export default function ProductsView() {
   const [catFilter, setCatFilter] = useState<LiquorCategory | 'all'>('all')
   const [sort, setSort] = useState<SortKey>('name')
   const [scannerOpen, setScannerOpen] = useState(false)
+  const { resolveCode } = useProductCodeLookup()
 
   const handleScan = useCallback((code: string) => {
     setScannerOpen(false)
-    setSearch(code)
-  }, [])
+    setSearch(resolveCode(code))
+  }, [resolveCode])
 
   const { latestQoh, activePromoIds } = useMemo(() => {
     const lq = snapshots ? getLatestQoh(snapshots) : new Map<number, number>()

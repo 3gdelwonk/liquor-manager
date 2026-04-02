@@ -21,7 +21,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     scanner
       .start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
+        { fps: 10, qrbox: { width: 250, height: 200 } },
         (decodedText) => {
           scanner.stop().catch(() => {})
           onScan(decodedText)
@@ -57,7 +57,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       <div className="flex-1 flex items-center justify-center">
         <div id={containerRef.current} className="w-full max-w-sm" />
       </div>
-      <p className="text-center text-xs text-white/50 pb-6">Point camera at barcode on bottle</p>
+      <p className="text-center text-xs text-white/50 pb-6">Point camera at barcode, QR code, or any label</p>
     </div>
   )
 }

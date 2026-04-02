@@ -13,6 +13,7 @@ import {
 } from '../lib/jarvis'
 import type { ItemSalesData, DailySale, LivePromotion } from '../lib/jarvis'
 import ProductImage from './ProductImage'
+import { useProductCodeLookup } from '../lib/useProductCodes'
 
 type TrackMode = 'host' | 'user'
 
@@ -805,6 +806,7 @@ function PromoDetail({ item, onBack, onUpdate }: {
 }) {
   const [salesData, setSalesData] = useState<ItemSalesData | null>(null)
   const [loading, setLoading] = useState(true)
+  const { getOrderCode } = useProductCodeLookup()
 
   useEffect(() => {
     let cancelled = false
@@ -875,7 +877,12 @@ function PromoDetail({ item, onBack, onUpdate }: {
               {item.source === 'manual' ? 'Manual' : 'System'}
             </span>
           </div>
-          <p className="text-xs text-gray-400">{item.department} &middot; {item.itemCode}</p>
+          <div className="flex items-center gap-1.5 text-[10px] text-gray-400 font-mono">
+            {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
+            {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
+            <span className="text-gray-300">{item.itemCode}</span>
+          </div>
+          <p className="text-xs text-gray-400">{item.department}</p>
         </div>
         <PromoStatusBadge status={item.status} endDate={item.endDate} />
       </div>
@@ -1022,6 +1029,7 @@ function PromoDetail({ item, onBack, onUpdate }: {
 
 function PromoTrackingList() {
   const trackedPromos = useLiveQuery(() => db.trackedPromos.toArray(), [])
+  const { getOrderCode } = useProductCodeLookup()
   const [showAdd, setShowAdd] = useState(false)
   const [selectedPromo, setSelectedPromo] = useState<TrackedPromo | null>(null)
   const [filter, setFilter] = useState<'all' | 'active' | 'ended' | 'completed'>('all')
@@ -1177,8 +1185,9 @@ function PromoTrackingList() {
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
-                      <span>{item.itemCode}</span>
-                      {item.barcode && <span>· {item.barcode}</span>}
+                      {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
+                      {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
+                      <span className="text-gray-300">{item.itemCode}</span>
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className="text-xs text-gray-400">
@@ -1238,6 +1247,7 @@ function UserChangeDetail({ item, onBack }: { item: UserChange; onBack: () => vo
   const [salesData, setSalesData] = useState<ItemSalesData | null>(null)
   const [loading, setLoading] = useState(true)
   const [chartMode, setChartMode] = useState<ChartMode>('weekly')
+  const { getOrderCode } = useProductCodeLookup()
 
   useEffect(() => {
     let cancelled = false
@@ -1295,7 +1305,12 @@ function UserChangeDetail({ item, onBack }: { item: UserChange; onBack: () => vo
         <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={48} />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-900 truncate">{item.description}</p>
-          <p className="text-xs text-gray-400">{item.department} &middot; {item.itemCode}</p>
+          <div className="flex items-center gap-1.5 text-[10px] text-gray-400 font-mono">
+            {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
+            {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
+            <span className="text-gray-300">{item.itemCode}</span>
+          </div>
+          <p className="text-xs text-gray-400">{item.department}</p>
         </div>
       </div>
 
@@ -1419,6 +1434,7 @@ function UserChangesList() {
   const [loading, setLoading] = useState(true)
   const [listSearch, setListSearch] = useState('')
   const [selected, setSelected] = useState<UserChange | null>(null)
+  const { getOrderCode } = useProductCodeLookup()
 
   const fetchChanges = useCallback(async () => {
     setLoading(true)
@@ -1514,8 +1530,9 @@ function UserChangesList() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
                     <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
-                      <span>{item.itemCode}</span>
-                      {item.barcode && <span>· {item.barcode}</span>}
+                      {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
+                      {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
+                      <span className="text-gray-300">{item.itemCode}</span>
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-gray-400">
