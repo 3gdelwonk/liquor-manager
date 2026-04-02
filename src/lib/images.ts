@@ -248,4 +248,64 @@ export async function clearImageCache(): Promise<number> {
   return count
 }
 
+// ── Image picker: return multiple results for manual selection ────────────
+
+export interface ImageOption {
+  imageUrl: string
+  title: string
+  source: string
+  width: number
+  height: number
+}
+
+export async function searchProductImages(
+  _itemCode: string,
+  description: string,
+  department: string,
+  barcode?: string | null,
+): Promise<ImageOption[]> {
+  const apiKey = getSerperApiKey()
+  if (!apiKey) return []
+
+  const queries = [
+    buildSearchQuery(description, department),
+    ...(barcode ? [buildSearchQuery(description, department, barcode)] : []),
+  ]
+
+  const seen = new Set<string>()
+  const results: ImageOption[] = []
+
+  for (const query of queries) {
+    try {
+      const res = await fetch('https://google.serper.dev/images', {
+        method: 'POST',
+        headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, num: 10 }),
+      })
+      if (!res.ok) continue
+      const data: SerperResponse = await res.json()
+      if (!data.images) continue
+      for (const img of data.images) {
+        if (img.imageWidth >= 80 && img.imageHeight >= 80 && !seen.has(img.imageUrl)) {
+          seen.add(img.imageUrl)
+          results.push({
+            imageUrl: img.imageUrl,
+            title: img.title,
+            source: img.domain,
+            width: img.imageWidth,
+            height: img.imageHeight,
+          })
+        }
+      }
+    } catch { /* skip failed query */ }
+  }
+
+  return results
+}
+
+export async function saveSelectedImage(itemCode: string, imageUrl: string): Promise<void> {
+  await db.imageCache.put({ itemCode, imageUrl, fetchedAt: new Date() })
+  pushImageToJarvis(itemCode, imageUrl)
+}
+
 export { cleanDescription, buildSearchQuery }
