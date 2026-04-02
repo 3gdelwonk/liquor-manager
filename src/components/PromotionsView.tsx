@@ -4,6 +4,7 @@ import { checkConnection, getPromotions, getStockLevels, type LivePromotion } fr
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import BarcodeScanner from './BarcodeScanner'
+import BarcodeStripe from './BarcodeStripe'
 import ProductImage from './ProductImage'
 
 type Segment = 'active' | 'upcoming'
@@ -44,7 +45,7 @@ function marginColor(m: number) {
   return 'text-green-600'
 }
 
-function PromoCard({ promo, isUpcoming, isTracked, orderCode }: { promo: LivePromotion; isUpcoming: boolean; isTracked?: boolean; orderCode?: string | null }) {
+function PromoCard({ promo, isUpcoming, isTracked, orderCode, barcode }: { promo: LivePromotion; isUpcoming: boolean; isTracked?: boolean; orderCode?: string | null; barcode?: string | null }) {
   const badgeClass = DEPT_COLORS[promo.department] ?? 'bg-gray-100 text-gray-600'
 
   const daysUntilStart = isUpcoming
@@ -53,7 +54,7 @@ function PromoCard({ promo, isUpcoming, isTracked, orderCode }: { promo: LivePro
 
   return (
     <div className="border border-gray-100 rounded-xl p-3 flex gap-3">
-      <ProductImage itemCode={promo.itemCode} description={promo.description} department={promo.department} size={56} />
+      <ProductImage itemCode={promo.itemCode} description={promo.description} department={promo.department} barcode={barcode} size={56} />
       <div className="flex-1 min-w-0 space-y-1.5">
       {/* Header: name + dept badge */}
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -115,6 +116,9 @@ function PromoCard({ promo, isUpcoming, isTracked, orderCode }: { promo: LivePro
         <Calendar size={10} />
         <span>{fmtDate(promo.startDate)} → {fmtDateFull(promo.endDate)}</span>
       </div>
+
+      {/* Barcode */}
+      {barcode && <BarcodeStripe value={barcode} height={30} />}
       </div>
     </div>
   )
@@ -427,14 +431,14 @@ export default function PromotionsView() {
               </div>
               <div className="space-y-2">
                 {items.map(p => (
-                  <PromoCard key={p.itemCode} promo={p} isUpcoming isTracked={trackedItemCodes.has(p.itemCode)} orderCode={getOrderCode(itemCodeToBarcode.get(p.itemCode) ?? null)} />
+                  <PromoCard key={p.itemCode} promo={p} isUpcoming isTracked={trackedItemCodes.has(p.itemCode)} orderCode={getOrderCode(itemCodeToBarcode.get(p.itemCode) ?? null)} barcode={itemCodeToBarcode.get(p.itemCode)} />
                 ))}
               </div>
             </div>
           ))
         ) : (
           displayed.map(p => (
-            <PromoCard key={p.itemCode} promo={p} isUpcoming={false} isTracked={trackedItemCodes.has(p.itemCode)} orderCode={getOrderCode(itemCodeToBarcode.get(p.itemCode) ?? null)} />
+            <PromoCard key={p.itemCode} promo={p} isUpcoming={false} isTracked={trackedItemCodes.has(p.itemCode)} orderCode={getOrderCode(itemCodeToBarcode.get(p.itemCode) ?? null)} barcode={itemCodeToBarcode.get(p.itemCode)} />
           ))
         )}
       </div>

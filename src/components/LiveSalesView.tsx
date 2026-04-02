@@ -8,6 +8,8 @@ import {
 } from '../lib/jarvis'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import BarcodeScanner from './BarcodeScanner'
+import BarcodeStripe from './BarcodeStripe'
+import ProductImage from './ProductImage'
 
 type LiveTab = 'sales' | 'items' | 'stock'
 type Period = 'today' | 'week'
@@ -371,31 +373,39 @@ export default function LiveSalesView() {
             </div>
             {liquorSellers.length > 0 ? (
               <div className="divide-y divide-gray-50">
-                {liquorSellers.map((item, i) => (
-                  <div key={item.itemCode} className="flex items-center gap-3 py-2.5">
-                    <span className="text-xs text-gray-400 w-6 text-right shrink-0">{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800 truncate">{item.description}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                        {(() => { const oc = getOrderCode(itemCodeToBarcode.get(item.itemCode) ?? null); return oc ? <span className="text-[10px] text-gray-400 font-mono">#{oc}</span> : null })()}
-                        <span className="text-[10px] text-gray-300 font-mono">{item.itemCode}</span>
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded font-medium"
-                          style={{
-                            backgroundColor: (DEPT_COLORS[item.department] ?? FALLBACK_COLOR) + '18',
-                            color: DEPT_COLORS[item.department] ?? FALLBACK_COLOR,
-                          }}
-                        >
-                          {item.department}
-                        </span>
+                {liquorSellers.map((item, i) => {
+                  const barcode = itemCodeToBarcode.get(item.itemCode) ?? null
+                  const orderCode = getOrderCode(barcode)
+                  return (
+                    <div key={item.itemCode} className="py-2.5 space-y-1.5">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-gray-400 w-6 text-right shrink-0">{i + 1}</span>
+                        <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={barcode} size={40} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-800 truncate">{item.description}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {orderCode && <span className="text-[10px] text-gray-400 font-mono">#{orderCode}</span>}
+                            <span className="text-[10px] text-gray-300 font-mono">{item.itemCode}</span>
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded font-medium"
+                              style={{
+                                backgroundColor: (DEPT_COLORS[item.department] ?? FALLBACK_COLOR) + '18',
+                                color: DEPT_COLORS[item.department] ?? FALLBACK_COLOR,
+                              }}
+                            >
+                              {item.department}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs font-semibold text-gray-700">{item.quantitySold} sold</p>
+                          <p className="text-xs text-gray-400">${fmtMoney(item.revenue)}</p>
+                        </div>
                       </div>
+                      {barcode && <div className="ml-9 mr-2"><BarcodeStripe value={barcode} height={32} /></div>}
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs font-semibold text-gray-700">{item.quantitySold} sold</p>
-                      <p className="text-xs text-gray-400">${fmtMoney(item.revenue)}</p>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <p className="text-center text-sm text-gray-400 py-8">
@@ -436,35 +446,40 @@ export default function LiveSalesView() {
                 {filteredStock.map(item => {
                   const low = item.onHand < item.reorderLevel
                   const negative = item.onHand < 0
+                  const orderCode = getOrderCode(item.barcode)
                   return (
-                    <div key={item.itemCode} className="flex items-center gap-3 py-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-gray-800 truncate">{item.description}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                          {(() => { const oc = getOrderCode(item.barcode); return oc ? <span className="text-[10px] text-gray-400 font-mono">#{oc}</span> : null })()}
-                          {item.barcode && <span className="text-[10px] text-gray-300 font-mono">{item.barcode}</span>}
-                          <span
-                            className="text-xs px-1.5 py-0.5 rounded font-medium"
-                            style={{
-                              backgroundColor: (DEPT_COLORS[item.department] ?? FALLBACK_COLOR) + '18',
-                              color: DEPT_COLORS[item.department] ?? FALLBACK_COLOR,
-                            }}
-                          >
-                            {item.department}
-                          </span>
-                          {item.onOrder > 0 && (
-                            <span className="text-xs text-blue-500">+{item.onOrder} on order</span>
-                          )}
+                    <div key={item.itemCode} className="py-3 space-y-1.5">
+                      <div className="flex items-center gap-3">
+                        <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-800 truncate">{item.description}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {orderCode && <span className="text-[10px] text-gray-400 font-mono">#{orderCode}</span>}
+                            <span className="text-[10px] text-gray-300 font-mono">{item.itemCode}</span>
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded font-medium"
+                              style={{
+                                backgroundColor: (DEPT_COLORS[item.department] ?? FALLBACK_COLOR) + '18',
+                                color: DEPT_COLORS[item.department] ?? FALLBACK_COLOR,
+                              }}
+                            >
+                              {item.department}
+                            </span>
+                            {item.onOrder > 0 && (
+                              <span className="text-xs text-blue-500">+{item.onOrder} on order</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-sm font-bold ${negative ? 'text-red-600' : low ? 'text-amber-600' : 'text-gray-800'}`}>
+                            {item.onHand}
+                          </p>
+                          <p className={`text-xs ${negative ? 'text-red-400' : low ? 'text-amber-400' : 'text-gray-400'}`}>
+                            {negative ? 'Negative' : low ? `⚠ min ${item.reorderLevel}` : 'QOH'}
+                          </p>
                         </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className={`text-sm font-bold ${negative ? 'text-red-600' : low ? 'text-amber-600' : 'text-gray-800'}`}>
-                          {item.onHand}
-                        </p>
-                        <p className={`text-xs ${negative ? 'text-red-400' : low ? 'text-amber-400' : 'text-gray-400'}`}>
-                          {negative ? 'Negative' : low ? `⚠ min ${item.reorderLevel}` : 'QOH'}
-                        </p>
-                      </div>
+                      {item.barcode && <div className="ml-12"><BarcodeStripe value={item.barcode} height={32} /></div>}
                     </div>
                   )
                 })}

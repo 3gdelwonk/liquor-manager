@@ -91,6 +91,11 @@ function ProductRow({ product, qoh, activePromo, isTracked }: { product: Product
         {qoh !== undefined && (
           <QohGauge qoh={qoh} min={product.minStockLevel} max={product.maxStockLevel} />
         )}
+        {product.barcode && (
+          <div className="mt-1.5">
+            <BarcodeStripe value={product.barcode} height={30} />
+          </div>
+        )}
       </button>
 
       {expanded && (

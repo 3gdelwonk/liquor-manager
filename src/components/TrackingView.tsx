@@ -1234,6 +1234,7 @@ function PromoTrackingList() {
                   </div>
                   {!reordering && <PromoStatusBadge status={item._effectiveStatus} endDate={item.endDate} />}
                 </button>
+                {item.barcode && <div className="px-3 pb-2"><BarcodeStripe value={item.barcode} height={30} /></div>}
               </div>
             ))}
           </div>
@@ -1568,30 +1569,32 @@ function UserChangesList() {
               const priceDiff = item.newPrice - item.oldPrice
               const pctChange = item.oldPrice > 0 ? (priceDiff / item.oldPrice) * 100 : 0
               return (
-                <button key={`${item.itemCode}-${item.changeDate}`} onClick={() => setSelected(item)} className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50">
-                  <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
-                      {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
-                      {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
-                      <span className="text-gray-300">{item.itemCode}</span>
+                <div key={`${item.itemCode}-${item.changeDate}`}>
+                  <button onClick={() => setSelected(item)} className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50">
+                    <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
+                        {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
+                        <span className="text-gray-300">{item.itemCode}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-gray-400">
+                          {fmtPrice(item.oldPrice)} → <span className={priceDiff > 0 ? 'text-red-500 font-medium' : 'text-green-600 font-medium'}>{fmtPrice(item.newPrice)}</span>
+                        </span>
+                        <span className={`text-[10px] font-medium ${priceDiff > 0 ? 'text-red-400' : 'text-green-500'}`}>
+                          {priceDiff > 0 ? '+' : ''}{pctChange.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-gray-300">{fmtDate(item.changeDate)}</span>
+                        <span className="text-[10px] text-blue-500">{item.changedBy}</span>
+                        <span className="text-[10px] text-gray-300">{item.department}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-gray-400">
-                        {fmtPrice(item.oldPrice)} → <span className={priceDiff > 0 ? 'text-red-500 font-medium' : 'text-green-600 font-medium'}>{fmtPrice(item.newPrice)}</span>
-                      </span>
-                      <span className={`text-[10px] font-medium ${priceDiff > 0 ? 'text-red-400' : 'text-green-500'}`}>
-                        {priceDiff > 0 ? '+' : ''}{pctChange.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-gray-300">{fmtDate(item.changeDate)}</span>
-                      <span className="text-[10px] text-blue-500">{item.changedBy}</span>
-                      <span className="text-[10px] text-gray-300">{item.department}</span>
-                    </div>
-                  </div>
-                </button>
+                  </button>
+                  {item.barcode && <div className="px-3 pb-2"><BarcodeStripe value={item.barcode} height={30} /></div>}
+                </div>
               )
             })}
           </div>
