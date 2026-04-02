@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 import { X } from 'lucide-react'
 
@@ -10,12 +10,17 @@ interface BarcodeScannerProps {
 
 export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null)
-  const containerRef = useRef<string>('barcode-reader')
+  const onScanRef = useRef(onScan)
+  onScanRef.current = onScan
+
+  const stableOnScan = useCallback((code: string) => {
+    onScanRef.current(code)
+  }, [])
 
   useEffect(() => {
     if (!open) return
 
-    const scanner = new Html5Qrcode(containerRef.current)
+    const scanner = new Html5Qrcode('barcode-reader')
     scannerRef.current = scanner
 
     scanner
@@ -24,7 +29,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         { fps: 10, qrbox: { width: 250, height: 200 } },
         (decodedText) => {
           scanner.stop().catch(() => {})
-          onScan(decodedText)
+          stableOnScan(decodedText)
         },
         () => {},
       )
@@ -36,7 +41,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       scanner.stop().catch(() => {})
       scannerRef.current = null
     }
-  }, [open, onScan])
+  }, [open, stableOnScan])
 
   if (!open) return null
 
@@ -55,7 +60,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         </button>
       </div>
       <div className="flex-1 flex items-center justify-center">
-        <div id={containerRef.current} className="w-full max-w-sm" />
+        <div id="barcode-reader" className="w-full max-w-sm" />
       </div>
       <p className="text-center text-xs text-white/50 pb-6">Point camera at barcode, QR code, or any label</p>
     </div>
