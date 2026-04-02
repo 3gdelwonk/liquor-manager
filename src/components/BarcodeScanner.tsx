@@ -1,6 +1,6 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
-import { X } from 'lucide-react'
+import { X, AlertTriangle } from 'lucide-react'
 
 interface BarcodeScannerProps {
   open: boolean
@@ -11,14 +11,17 @@ interface BarcodeScannerProps {
 export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const onScanRef = useRef(onScan)
+  const onCloseRef = useRef(onClose)
   onScanRef.current = onScan
-
-  const stableOnScan = useCallback((code: string) => {
-    onScanRef.current(code)
-  }, [])
+  onCloseRef.current = onClose
+  const activeRef = useRef(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
+
+    setError(null)
+    activeRef.current = true
 
     const scanner = new Html5Qrcode('barcode-reader')
     scannerRef.current = scanner
@@ -28,20 +31,48 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 200 } },
         (decodedText) => {
-          scanner.stop().catch(() => {})
-          stableOnScan(decodedText)
+          if (!activeRef.current) return
+          activeRef.current = false
+          // Await stop before notifying parent to prevent race conditions
+          scanner.stop()
+            .then(() => { try { scanner.clear() } catch {} })
+            .catch(() => {})
+            .finally(() => {
+              scannerRef.current = null
+              onScanRef.current(decodedText)
+            })
         },
         () => {},
       )
       .catch((err) => {
-        console.error('Camera error:', err)
+        setError(typeof err === 'string' ? err : (err as Error).message ?? 'Camera not available')
       })
 
     return () => {
-      scanner.stop().catch(() => {})
+      activeRef.current = false
+      const s = scannerRef.current
       scannerRef.current = null
+      if (s) {
+        s.stop()
+          .then(() => { try { s.clear() } catch {} })
+          .catch(() => { try { s.clear() } catch {} })
+      }
     }
-  }, [open, stableOnScan])
+  }, [open])
+
+  function handleClose() {
+    activeRef.current = false
+    const s = scannerRef.current
+    scannerRef.current = null
+    if (s) {
+      s.stop()
+        .then(() => { try { s.clear() } catch {} })
+        .catch(() => { try { s.clear() } catch {} })
+        .finally(() => onCloseRef.current())
+    } else {
+      onCloseRef.current()
+    }
+  }
 
   if (!open) return null
 
@@ -49,20 +80,24 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     <div className="fixed inset-0 z-50 flex flex-col bg-black">
       <div className="flex items-center justify-between px-4 py-3 bg-black/80">
         <p className="text-sm font-medium text-white">Scan Barcode</p>
-        <button
-          onClick={() => {
-            scannerRef.current?.stop().catch(() => {})
-            onClose()
-          }}
-          className="text-white/70 hover:text-white p-1"
-        >
+        <button onClick={handleClose} className="text-white/70 hover:text-white p-1">
           <X size={20} />
         </button>
       </div>
       <div className="flex-1 flex items-center justify-center">
         <div id="barcode-reader" className="w-full max-w-sm" />
       </div>
-      <p className="text-center text-xs text-white/50 pb-6">Point camera at barcode, QR code, or any label</p>
+      {error ? (
+        <div className="px-6 pb-6 text-center space-y-3">
+          <div className="flex items-center justify-center gap-2 text-red-400">
+            <AlertTriangle size={16} />
+            <p className="text-sm">{error}</p>
+          </div>
+          <button onClick={handleClose} className="text-sm text-white/70 underline">Close and try again</button>
+        </div>
+      ) : (
+        <p className="text-center text-xs text-white/50 pb-6">Point camera at barcode, QR code, or any label</p>
+      )}
     </div>
   )
 }
