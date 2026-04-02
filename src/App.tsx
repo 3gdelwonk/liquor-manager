@@ -1,11 +1,11 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, useRef, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Package, BarChart2, Tag, Settings, Activity, Crosshair } from 'lucide-react'
+import { Lightbulb, Package, BarChart2, Tag, Settings, Activity, Crosshair } from 'lucide-react'
 import { clearAllData } from './lib/db'
 import { getStockLevels, LIQUOR_DEPT_NAMES } from './lib/jarvis'
 import { prefetchImages, isImageSearchConfigured, clearImageCache, type PrefetchProgress } from './lib/images'
-import Dashboard from './components/Dashboard'
+import InsightsView from './components/InsightsView'
 import ProductsView from './components/ProductsView'
 import PerformanceView from './components/PerformanceView'
 import PromotionsView from './components/PromotionsView'
@@ -228,11 +228,11 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'live' | 'home' | 'products' | 'performance' | 'promos' | 'tracking'
+type Tab = 'live' | 'insights' | 'products' | 'performance' | 'promos' | 'tracking'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'live',        label: 'Live',      icon: <Activity size={16} /> },
-  { id: 'home',        label: 'Home',      icon: <LayoutDashboard size={16} /> },
+  { id: 'insights',    label: 'Insights',  icon: <Lightbulb size={16} /> },
   { id: 'products',    label: 'Products',  icon: <Package size={16} /> },
   { id: 'performance', label: 'Perform',   icon: <BarChart2 size={16} /> },
   { id: 'promos',      label: 'Promos',    icon: <Tag size={16} /> },
@@ -241,7 +241,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 
 const TAB_TITLES: Record<Tab, string> = {
   live:        'Live Sales',
-  home:        'Liquor Manager',
+  insights:    'Insights',
   products:    'Products',
   performance: 'Performance',
   promos:      'Promotions',
@@ -266,7 +266,7 @@ export default function App() {
   const renderTab = () => {
     switch (activeTab) {
       case 'live':        return <LiveSalesView />
-      case 'home':        return <Dashboard />
+      case 'insights':    return <InsightsView />
       case 'products':    return <ProductsView />
       case 'performance': return <PerformanceView />
       case 'promos':      return <PromotionsView />

@@ -7,6 +7,26 @@ export interface ImageCacheEntry {
   fetchedAt: Date
 }
 
+export interface NewsArticle {
+  id?: number
+  sourceId: string
+  title: string
+  link: string
+  pubDate: string
+  description: string
+  tags: string[]
+  fetchedAt: Date
+}
+
+export interface ABSDataPoint {
+  id?: number
+  period: string        // e.g. "2026-01" (YYYY-MM)
+  turnover: number      // $ millions
+  changePercent: number  // month-on-month %
+  state: string
+  fetchedAt?: Date
+}
+
 export interface TrackedItem {
   id?: number
   itemCode: string
@@ -59,6 +79,8 @@ class LiquorManagerDB extends Dexie {
   imageCache!: EntityTable<ImageCacheEntry, 'itemCode'>
   trackedItems!: EntityTable<TrackedItem, 'id'>
   trackedPromos!: EntityTable<TrackedPromo, 'id'>
+  newsArticles!: EntityTable<NewsArticle, 'id'>
+  absData!: EntityTable<ABSDataPoint, 'id'>
 
   constructor() {
     super('LiquorManagerDB')
@@ -96,13 +118,25 @@ class LiquorManagerDB extends Dexie {
       trackedItems:   '++id, itemCode, status, changeDate',
       trackedPromos:  '++id, itemCode, status, startDate, endDate',
     })
+    this.version(5).stores({
+      products:       '++id, barcode, invoiceCode, category, active',
+      stockSnapshots: '++id, [productId+importedAt], barcode, importBatchId',
+      salesRecords:   '++id, barcode, date, [barcode+date], productId, importBatchId',
+      promotions:     '++id, productId, startDate, endDate',
+      importLog:      '++id, importedAt, type',
+      imageCache:     'itemCode, fetchedAt',
+      trackedItems:   '++id, itemCode, status, changeDate',
+      trackedPromos:  '++id, itemCode, status, startDate, endDate',
+      newsArticles:   '++id, sourceId, link, pubDate',
+      absData:        '++id, period',
+    })
   }
 }
 
 export const db = new LiquorManagerDB()
 
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', [db.products, db.stockSnapshots, db.salesRecords, db.promotions, db.importLog, db.imageCache, db.trackedItems, db.trackedPromos], async () => {
+  await db.transaction('rw', [db.products, db.stockSnapshots, db.salesRecords, db.promotions, db.importLog, db.imageCache, db.trackedItems, db.trackedPromos, db.newsArticles, db.absData], async () => {
     await db.products.clear()
     await db.stockSnapshots.clear()
     await db.salesRecords.clear()
@@ -111,5 +145,7 @@ export async function clearAllData(): Promise<void> {
     await db.imageCache.clear()
     await db.trackedItems.clear()
     await db.trackedPromos.clear()
+    await db.newsArticles.clear()
+    await db.absData.clear()
   })
 }

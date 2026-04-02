@@ -27,3 +27,21 @@ export const LIQUOR_DEPT_TERMS = [
 ]
 
 export const CATEGORY_ORDER: LiquorCategory[] = ['beer', 'wine', 'spirits', 'cider', 'rtd', 'non_alc', 'other']
+
+// ─── Insights ────────────────────────────────────────────────────────────────
+
+export const INSIGHT_COLORS = {
+  up:       '#16a34a',  // green-600
+  down:     '#dc2626',  // red-600
+  neutral:  '#6b7280',  // gray-500
+  accent:   '#7c3aed',  // violet-600
+  bar:      '#8b5cf6',  // violet-500
+} as const
+
+export const NEWS_TAG_COLORS: Record<string, string> = {
+  beer:       '#f59e0b',
+  wine:       '#dc2626',
+  spirits:    '#7c3aed',
+  rtd:        '#3b82f6',
+  regulation: '#6b7280',
+}
