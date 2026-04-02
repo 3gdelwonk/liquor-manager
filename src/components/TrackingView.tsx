@@ -1,23 +1,20 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  Plus, Search, ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle,
-  CheckCircle, XCircle, ScanBarcode, Bell, X, RefreshCw, Tag, DollarSign, Calendar,
+  Plus, Search, ArrowLeft, TrendingUp, TrendingDown, Minus,
+  CheckCircle, X, RefreshCw, Tag, DollarSign, Calendar,
   ChevronUp, ChevronDown, ArrowUpDown, Edit3, MessageSquare
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, CartesianGrid } from 'recharts'
-import { db, type TrackedItem, type TrackedPromo } from '../lib/db'
+import { db, type TrackedPromo } from '../lib/db'
 import {
-  searchItems, getItemPrice, getPriceHistory, getItemSales,
+  searchItems, getItemSales,
   getRecentPriceChanges, getPromotions, LIQUOR_DEPT_NAMES
 } from '../lib/jarvis'
-import type { PriceCheck, PriceHistoryEntry, ItemSalesData, DailySale, LivePromotion } from '../lib/jarvis'
+import type { ItemSalesData, DailySale, LivePromotion } from '../lib/jarvis'
 import ProductImage from './ProductImage'
-import BarcodeScanner from './BarcodeScanner'
 
 type TrackMode = 'host' | 'user'
-
-const LAST_CHECK_KEY = 'liquor-manager-tracking-last-check'
 
 // ════════════════════════════════════════════════════════════════════════════
 // Shared helpers
@@ -1219,740 +1216,123 @@ function PromoTrackingList() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// PRICE CHANGE TRACKING MODE (existing)
+// USER CHANGES MODE — live feed of user price changes
 // ════════════════════════════════════════════════════════════════════════════
 
-function DetectedChanges({ items, onTrack, onDismiss, onDismissAll }: {
-  items: { itemCode: string; barcode: string | null; description: string; department: string; oldPrice: number; newPrice: number; changeDate: string; source: string }[]
-  onTrack: (item: typeof items[0]) => void
-  onDismiss: (itemCode: string) => void
-  onDismissAll: () => void
-}) {
-  if (items.length === 0) return null
-
-  return (
-    <div className="bg-violet-50 border-b border-violet-100 px-4 py-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Bell size={14} className="text-violet-600" />
-          <span className="text-xs font-semibold text-violet-700">
-            {items.length} change{items.length !== 1 ? 's' : ''} detected
-          </span>
-        </div>
-        <button onClick={onDismissAll} className="text-[10px] text-violet-400 hover:text-violet-600">
-          Dismiss all
-        </button>
-      </div>
-      <div className="space-y-1.5 max-h-48 overflow-auto">
-        {items.map(item => (
-          <div key={item.itemCode} className="flex items-center gap-2 bg-white rounded-lg p-2">
-            <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={32} />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-gray-900 truncate">{item.description}</p>
-              <p className="text-[10px] text-gray-400">
-                {fmtPrice(item.oldPrice)} → <span className="text-violet-600 font-medium">{fmtPrice(item.newPrice)}</span>
-                {' '}&middot; {fmtDate(item.changeDate)}
-              </p>
-              <p className="text-[9px] text-blue-500">{item.source}</p>
-            </div>
-            <button
-              onClick={() => onTrack(item)}
-              className="px-2.5 py-1 bg-violet-600 text-white text-[10px] font-medium rounded-lg shrink-0"
-            >
-              Track
-            </button>
-            <button
-              onClick={() => onDismiss(item.itemCode)}
-              className="p-1 text-gray-300 hover:text-gray-500 shrink-0"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function AddItemSheet({ onClose }: { onClose: () => void }) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<{ itemCode: string; barcode: string | null; description: string; department: string; sellPrice: number }[]>([])
-  const [searching, setSearching] = useState(false)
-  const [selected, setSelected] = useState<typeof results[0] | null>(null)
-  const [newPrice, setNewPrice] = useState('')
-  const [changeDate, setChangeDate] = useState(new Date().toISOString().slice(0, 10))
-  const [notes, setNotes] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [scannerOpen, setScannerOpen] = useState(false)
-
-  async function handleSearch() {
-    if (!query.trim()) return
-    setSearching(true)
-    try {
-      const res = await searchItems(query, 10)
-      setResults(res.items.map(i => ({
-        itemCode: i.itemCode, barcode: i.barcode, description: i.description,
-        department: i.department, sellPrice: i.sellPrice,
-      })))
-    } catch { setResults([]) }
-    setSearching(false)
-  }
-
-  function handleScan(code: string) {
-    setScannerOpen(false)
-    setQuery(code)
-    setTimeout(() => {
-      setQuery(code)
-      searchItems(code, 10).then(res => {
-        const mapped = res.items.map(i => ({
-          itemCode: i.itemCode, barcode: i.barcode, description: i.description,
-          department: i.department, sellPrice: i.sellPrice,
-        }))
-        setResults(mapped)
-        if (mapped.length === 1) setSelected(mapped[0])
-      }).catch(() => {})
-    }, 100)
-  }
-
-  async function handleSave() {
-    if (!selected || !newPrice) return
-    setSaving(true)
-    await db.trackedItems.add({
-      itemCode: selected.itemCode,
-      barcode: selected.barcode,
-      description: selected.description,
-      department: selected.department,
-      originalPrice: selected.sellPrice,
-      newPrice: parseFloat(newPrice),
-      changeDate,
-      notes,
-      status: 'active',
-      currentPrice: null,
-      revertedAt: null,
-      createdAt: new Date(),
-    })
-    setSaving(false)
-    onClose()
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-t-2xl p-5 space-y-4 pb-safe max-h-[85vh] overflow-auto">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Manual Track</h2>
-          <button onClick={onClose} className="text-gray-400 text-lg leading-none">✕</button>
-        </div>
-        <p className="text-xs text-gray-400">For items not auto-detected from Smart Retail price changes</p>
-
-        {!selected ? (
-          <>
-            <div className="flex gap-2">
-              <div className="flex-1 relative">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                  placeholder="Search product or barcode..."
-                  className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                />
-              </div>
-              <button onClick={() => setScannerOpen(true)} className="p-2 border border-gray-200 rounded-lg text-gray-500">
-                <ScanBarcode size={18} />
-              </button>
-              <button onClick={handleSearch} disabled={searching} className="px-3 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg">
-                {searching ? '...' : 'Search'}
-              </button>
-            </div>
-
-            <div className="space-y-1 max-h-60 overflow-auto">
-              {results.map(item => (
-                <button
-                  key={item.itemCode}
-                  onClick={() => { setSelected(item); setNewPrice('') }}
-                  className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-gray-50 text-left"
-                >
-                  <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={36} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
-                    <p className="text-xs text-gray-400">{item.department} &middot; ${item.sellPrice.toFixed(2)}</p>
-                  </div>
-                </button>
-              ))}
-              {results.length === 0 && query && !searching && (
-                <p className="text-xs text-gray-400 text-center py-4">No results found</p>
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <button onClick={() => setSelected(null)} className="text-xs text-violet-600 flex items-center gap-1">
-              <ArrowLeft size={12} /> Change selection
-            </button>
-            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-              <ProductImage itemCode={selected.itemCode} description={selected.description} department={selected.department} barcode={selected.barcode} size={40} />
-              <div>
-                <p className="text-sm font-medium text-gray-900">{selected.description}</p>
-                <p className="text-xs text-gray-400">Current: ${selected.sellPrice.toFixed(2)}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium text-gray-500">New Price</label>
-                <input
-                  type="number" step="0.01" value={newPrice}
-                  onChange={e => setNewPrice(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-gray-500">Change Date</label>
-                <input
-                  type="date" value={changeDate}
-                  onChange={e => setChangeDate(e.target.value)}
-                  className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500">Notes (optional)</label>
-              <input
-                value={notes} onChange={e => setNotes(e.target.value)}
-                placeholder="Reason for price change..."
-                className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-              />
-            </div>
-            <button
-              onClick={handleSave} disabled={!newPrice || saving}
-              className="w-full py-2.5 bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : 'Start Tracking'}
-            </button>
-          </>
-        )}
-      </div>
-      {scannerOpen && <BarcodeScanner open onScan={handleScan} onClose={() => setScannerOpen(false)} />}
-    </div>
-  )
-}
-
-function PriceStatusBadge({ status, revertedAt }: { status: TrackedItem['status']; revertedAt: string | null }) {
-  if (status === 'reverted') return (
-    <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
-      <XCircle size={10} /> Reverted{revertedAt ? ` ${fmtDate(revertedAt)}` : ''}
-    </span>
-  )
-  if (status === 'completed') return (
-    <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">
-      <CheckCircle size={10} /> Done
-    </span>
-  )
-  return (
-    <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-600">
-      <CheckCircle size={10} /> Active
-    </span>
-  )
-}
-
-function PriceTrackingDetail({ item, onBack, onUpdate }: {
-  item: TrackedItem
-  onBack: () => void
-  onUpdate: () => void
-}) {
-  const [priceCheck, setPriceCheck] = useState<PriceCheck | null>(null)
-  const [priceHistory, setPriceHistory] = useState<PriceHistoryEntry[]>([])
-  const [salesData, setSalesData] = useState<ItemSalesData | null>(null)
+function UserChangesList() {
+  const [changes, setChanges] = useState<{ itemCode: string; barcode: string | null; description: string; department: string; oldPrice: number; newPrice: number; changeDate: string; changedBy: string }[]>([])
   const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      try {
-        const [price, history, sales] = await Promise.all([
-          getItemPrice(item.itemCode).catch(() => null),
-          getPriceHistory(item.itemCode, 6).catch(() => []),
-          getItemSales(item.itemCode, 90).catch(() => null),
-        ])
-        if (cancelled) return
-        setPriceCheck(price)
-        setPriceHistory(history)
-        setSalesData(sales)
-
-        // Auto-detect reversion
-        if (price && item.status === 'active') {
-          const currentPrice = price.RegSellPrice
-          const priceHeld = Math.abs(currentPrice - item.newPrice) < 0.01
-          if (!priceHeld) {
-            const hostChange = history.find(h =>
-              h.changedBy === 'host' && new Date(h.date) >= new Date(item.changeDate)
-            )
-            if (hostChange) {
-              await db.trackedItems.update(item.id!, {
-                status: 'reverted',
-                currentPrice,
-                revertedAt: hostChange.date,
-              })
-              onUpdate()
-            } else {
-              await db.trackedItems.update(item.id!, { currentPrice })
-            }
-          } else {
-            await db.trackedItems.update(item.id!, { currentPrice })
-          }
-        }
-      } catch { /* API error */ }
-      if (!cancelled) setLoading(false)
-    }
-    load()
-    return () => { cancelled = true }
-  }, [item.itemCode, item.id])
-
-  const [chartMode, setChartMode] = useState<ChartMode>('weekly')
-  const { beforeSales, afterSales, chartData, changeDateLabel } = computeSalesImpact(salesData?.dailySales ?? [], item.changeDate, chartMode)
-
-  async function handleComplete() {
-    await db.trackedItems.update(item.id!, { status: 'completed' })
-    onUpdate()
-    onBack()
-  }
-
-  async function handleDelete() {
-    await db.trackedItems.delete(item.id!)
-    onUpdate()
-    onBack()
-  }
-
-  return (
-    <div className="p-4 space-y-4 overflow-auto">
-      <button onClick={onBack} className="text-sm text-violet-600 flex items-center gap-1">
-        <ArrowLeft size={14} /> Back
-      </button>
-
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={48} />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{item.description}</p>
-          <p className="text-xs text-gray-400">{item.department} &middot; {item.itemCode}</p>
-        </div>
-        <PriceStatusBadge status={item.status} revertedAt={item.revertedAt} />
-      </div>
-
-      {/* Price Status */}
-      <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase">Price Status</h3>
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div>
-            <p className="text-[10px] text-gray-400">Original</p>
-            <p className="text-sm font-semibold text-gray-500 line-through">{fmtPrice(item.originalPrice)}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-gray-400">Changed to</p>
-            <p className="text-sm font-semibold text-violet-600">{fmtPrice(item.newPrice)}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-gray-400">Current</p>
-            {loading ? (
-              <p className="text-sm text-gray-400">...</p>
-            ) : (
-              <p className={`text-sm font-semibold ${
-                priceCheck && Math.abs(priceCheck.RegSellPrice - item.newPrice) < 0.01
-                  ? 'text-green-600' : 'text-red-600'
-              }`}>
-                {priceCheck ? fmtPrice(priceCheck.RegSellPrice) : '—'}
-              </p>
-            )}
-          </div>
-        </div>
-        <p className="text-[10px] text-gray-400 text-center">
-          Changed on {fmtDate(item.changeDate)}
-          {item.notes ? ` — ${item.notes}` : ''}
-        </p>
-      </div>
-
-      {/* Price History */}
-      {priceHistory.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase">Price History</h3>
-          <div className="space-y-1">
-            {priceHistory.slice(0, 10).map((h, i) => (
-              <div key={i} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50">
-                <span className="text-gray-500">{fmtDate(h.date)}</span>
-                <span className="text-gray-400">{fmtPrice(h.oldPrice)} → {fmtPrice(h.newPrice)}</span>
-                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                  h.changedBy === 'host' ? 'bg-amber-100 text-amber-700'
-                    : h.changedBy === 'manual' ? 'bg-blue-100 text-blue-700'
-                    : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {h.changedBy}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Sales Chart */}
-      {salesData && chartData.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase">Sales ({chartMode === 'weekly' ? 'Weekly' : 'Daily'})</h3>
-            <ChartModeToggle mode={chartMode} onChange={setChartMode} />
-          </div>
-          <div className="h-48 -mx-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9ca3af' }} interval="preserveStartEnd" tickLine={false} />
-                <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: number) => [v.toFixed(1), chartMode === 'weekly' ? 'Wk Qty' : 'Qty']} labelFormatter={(l: string) => chartMode === 'weekly' ? `Wk of ${l}` : l} />
-                <ReferenceLine x={changeDateLabel} stroke="#7c3aed" strokeDasharray="4 4" label={{ value: 'Change', fontSize: 9, fill: '#7c3aed' }} />
-                <Bar dataKey="qty" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Before vs After comparison */}
-      {salesData && (beforeSales.length > 0 || afterSales.length > 0) && (
-        <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase">Sales Impact</h3>
-          <ComparisonRow label="Avg Daily Qty" before={avg(beforeSales.map(s => s.qty))} after={avg(afterSales.map(s => s.qty))} format={(n) => n.toFixed(1)} />
-          <ComparisonRow label="Avg Daily Revenue" before={avg(beforeSales.map(s => s.revenue))} after={avg(afterSales.map(s => s.revenue))} format={fmtPrice} />
-          <ComparisonRow label="Avg Daily GP" before={avg(beforeSales.map(s => s.gp))} after={avg(afterSales.map(s => s.gp))} format={fmtPrice} />
-          {salesData.avgCost > 0 && (
-            <ComparisonRow
-              label="GP Margin"
-              before={beforeSales.length > 0 && avg(beforeSales.map(s => s.revenue)) > 0 ? ((avg(beforeSales.map(s => s.gp)) / avg(beforeSales.map(s => s.revenue))) * 100) : 0}
-              after={afterSales.length > 0 && avg(afterSales.map(s => s.revenue)) > 0 ? ((avg(afterSales.map(s => s.gp)) / avg(afterSales.map(s => s.revenue))) * 100) : 0}
-              format={(n) => n.toFixed(1) + '%'}
-              invertColor
-            />
-          )}
-        </div>
-      )}
-
-      {/* Notes & Tags */}
-      <NotesAndTags
-        notes={item.notes}
-        tags={item.tags ?? []}
-        onSaveNotes={async (notes) => { await db.trackedItems.update(item.id!, { notes }); onUpdate() }}
-        onSaveTags={async (tags) => { await db.trackedItems.update(item.id!, { tags }); onUpdate() }}
-      />
-
-      {/* Actions */}
-      <div className="flex gap-2 pt-2">
-        {item.status === 'active' && (
-          <button onClick={handleComplete} className="flex-1 py-2 bg-green-50 text-green-600 text-sm font-medium rounded-lg">
-            Mark Complete
-          </button>
-        )}
-        <button onClick={handleDelete} className="flex-1 py-2 bg-red-50 text-red-600 text-sm font-medium rounded-lg">
-          Remove
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function PriceTrackingList() {
-  const trackedItems = useLiveQuery(() => db.trackedItems.toArray(), [])
-  const [filter, setFilter] = useState<'all' | 'active' | 'reverted' | 'completed'>('all')
-  const [showAdd, setShowAdd] = useState(false)
-  const [selectedItem, setSelectedItem] = useState<TrackedItem | null>(null)
-  const [reordering, setReordering] = useState(false)
   const [listSearch, setListSearch] = useState('')
-  const [, forceUpdate] = useState(0)
 
-  // Auto-detection: poll price changes (user-made) + user promos on liquor items
-  interface DetectedItem {
-    itemCode: string
-    barcode: string | null
-    description: string
-    department: string
-    oldPrice: number
-    newPrice: number
-    changeDate: string
-    source: string  // "price change (manual)" or "promo (15% off)"
-  }
-
-  const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
-  const [dismissedCodes, setDismissedCodes] = useState<Set<string>>(new Set())
-  const [checking, setChecking] = useState(false)
-
-  const refresh = useCallback(() => forceUpdate(n => n + 1), [])
-
-  const trackedPromoCodes = useLiveQuery(
-    () => db.trackedPromos.toArray().then(items => new Set(items.map(i => i.itemCode))), []
-  )
-
-  const checkForChanges = useCallback(async () => {
-    setChecking(true)
-    const existingCodes = new Set((trackedItems ?? []).map(t => t.itemCode))
-    const hostCodes = trackedPromoCodes ?? new Set<string>()
-    const allExisting = new Set([...existingCodes, ...hostCodes])
-    const results: DetectedItem[] = []
-    const seen = new Set<string>()
-
-    // 1. Poll user price changes (excludeHost=true → only manual/user changes)
+  const fetchChanges = useCallback(async () => {
+    setLoading(true)
     try {
-      const lastCheck = localStorage.getItem(LAST_CHECK_KEY)
-      const since = lastCheck || new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
-      const changes = await getRecentPriceChanges(since, true)
-      for (const c of changes) {
-        if (LIQUOR_DEPT_NAMES.has(c.department) && !allExisting.has(c.itemCode) && !dismissedCodes.has(c.itemCode) && !seen.has(c.itemCode)) {
-          seen.add(c.itemCode)
-          results.push({
-            itemCode: c.itemCode,
-            barcode: c.barcode,
-            description: c.description,
-            department: c.department,
-            oldPrice: c.oldPrice,
-            newPrice: c.newPrice,
-            changeDate: c.changeDate,
-            source: `Price change (${c.changedBy})`,
-          })
-        }
-      }
-      localStorage.setItem(LAST_CHECK_KEY, new Date().toISOString().slice(0, 10))
-    } catch { /* API not available */ }
-
-    // 2. Poll promotions for user-created promos (non-host scheduled by staff)
-    try {
-      const data = await getPromotions()
-      for (const p of data.items) {
-        if (!allExisting.has(p.itemCode) && !dismissedCodes.has(p.itemCode) && !seen.has(p.itemCode)) {
-          seen.add(p.itemCode)
-          results.push({
-            itemCode: p.itemCode,
-            barcode: null,
-            description: p.description,
-            department: p.department,
-            oldPrice: p.normalPrice,
-            newPrice: p.promoPrice,
-            changeDate: p.startDate,
-            source: `Promo (${p.discountPercent.toFixed(0)}% off)`,
-          })
-        }
-      }
-    } catch { /* API not available */ }
-
-    setDetectedItems(results)
-    setChecking(false)
-  }, [trackedItems, trackedPromoCodes, dismissedCodes])
-
-  useEffect(() => {
-    checkForChanges()
+      const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+      const results = await getRecentPriceChanges(since, true)
+      // Only liquor departments
+      setChanges(results.filter(c => LIQUOR_DEPT_NAMES.has(c.department)))
+    } catch {
+      setChanges([])
+    }
+    setLoading(false)
   }, [])
 
-  async function handleTrackDetected(item: DetectedItem) {
-    await db.trackedItems.add({
-      itemCode: item.itemCode,
-      barcode: item.barcode,
-      description: item.description,
-      department: item.department,
-      originalPrice: item.oldPrice,
-      newPrice: item.newPrice,
-      changeDate: item.changeDate,
-      notes: item.source,
-      status: 'active',
-      currentPrice: item.newPrice,
-      revertedAt: null,
-      createdAt: new Date(),
-    })
-    setDetectedItems(prev => prev.filter(d => d.itemCode !== item.itemCode))
-  }
+  useEffect(() => { fetchChanges() }, [])
 
-  function handleDismiss(itemCode: string) {
-    setDismissedCodes(prev => new Set([...prev, itemCode]))
-    setDetectedItems(prev => prev.filter(d => d.itemCode !== itemCode))
-  }
-
-  function handleDismissAll() {
-    setDetectedItems([])
-  }
-
-  if (!trackedItems) return <div className="p-4 text-sm text-gray-400">Loading...</div>
-
-  if (selectedItem) {
-    const current = trackedItems.find(t => t.id === selectedItem.id)
-    if (current) return <PriceTrackingDetail item={current} onBack={() => setSelectedItem(null)} onUpdate={refresh} />
-    setSelectedItem(null)
-  }
-
-  const sorted = sortByOrder(trackedItems)
-  let filtered = sorted.filter(t => filter === 'all' || t.status === filter)
-
+  // Filter by search
+  let displayed = changes
   if (listSearch.trim()) {
     const words = listSearch.trim().toLowerCase().split(/\s+/)
-    filtered = filtered.filter(t => {
-      const haystack = `${t.description} ${t.itemCode} ${(t.tags ?? []).join(' ')} ${t.notes}`.toLowerCase()
+    displayed = displayed.filter(c => {
+      const haystack = `${c.description} ${c.itemCode} ${c.changedBy}`.toLowerCase()
       return words.every(w => haystack.includes(w))
     })
   }
 
-  const counts = {
-    all: trackedItems.length,
-    active: trackedItems.filter(t => t.status === 'active').length,
-    reverted: trackedItems.filter(t => t.status === 'reverted').length,
-    completed: trackedItems.filter(t => t.status === 'completed').length,
-  }
-
-  async function handleToggleReorder() {
-    if (!reordering && trackedItems) {
-      await assignOrderIfNeeded('trackedItems', trackedItems)
-    }
-    setReordering(r => !r)
-  }
-
-  async function handleMove(index: number, direction: -1 | 1) {
-    await swapOrder('trackedItems', filtered, index, index + direction)
-  }
-
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Auto-detected changes banner */}
-      <DetectedChanges
-        items={detectedItems}
-        onTrack={handleTrackDetected}
-        onDismiss={handleDismiss}
-        onDismissAll={handleDismissAll}
-      />
-
-      {/* Filter tabs + reorder toggle */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-100 shrink-0">
-        {(['all', 'active', 'reverted', 'completed'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`flex-1 py-1.5 text-[11px] font-medium rounded-lg transition-colors ${
-              filter === f ? 'bg-violet-100 text-violet-700' : 'text-gray-500 hover:bg-gray-50'
-            }`}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)} ({counts[f]})
-          </button>
-        ))}
-        <button
-          onClick={handleToggleReorder}
-          className={`p-1.5 rounded-lg shrink-0 transition-colors ${
-            reordering ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-violet-600'
-          }`}
-          title="Reorder items"
-        >
-          <ArrowUpDown size={14} />
-        </button>
-      </div>
-
       {/* Search + refresh */}
-      <div className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-100 shrink-0">
-        {trackedItems.length > 0 && (
-          <div className="relative flex-1">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
-            <input
-              value={listSearch}
-              onChange={e => setListSearch(e.target.value)}
-              placeholder="Search tracked items..."
-              className="w-full pl-8 pr-3 py-1.5 bg-gray-50 border border-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white"
-            />
-            {listSearch && (
-              <button onClick={() => setListSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
-                <X size={12} />
-              </button>
-            )}
-          </div>
-        )}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 shrink-0">
+        <div className="relative flex-1">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300" />
+          <input
+            value={listSearch}
+            onChange={e => setListSearch(e.target.value)}
+            placeholder="Search user changes..."
+            className="w-full pl-8 pr-3 py-1.5 bg-gray-50 border border-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 focus:bg-white"
+          />
+          {listSearch && (
+            <button onClick={() => setListSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+              <X size={12} />
+            </button>
+          )}
+        </div>
         <button
-          onClick={checkForChanges}
-          disabled={checking}
+          onClick={fetchChanges}
+          disabled={loading}
           className="flex items-center gap-1 text-[10px] text-violet-500 hover:text-violet-700 shrink-0"
         >
-          <RefreshCw size={10} className={checking ? 'animate-spin' : ''} />
-          {checking ? 'Checking...' : 'Check for changes'}
+          <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+          Refresh
         </button>
       </div>
+
+      {/* Count */}
+      {!loading && changes.length > 0 && (
+        <div className="px-4 py-1.5 border-b border-gray-50 shrink-0">
+          <p className="text-[10px] text-gray-400">
+            {displayed.length} user price change{displayed.length !== 1 ? 's' : ''} in the last 30 days
+            {listSearch.trim() && displayed.length !== changes.length ? ` (${changes.length} total)` : ''}
+          </p>
+        </div>
+      )}
 
       {/* List */}
       <div className="flex-1 overflow-auto">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <RefreshCw size={20} className="text-violet-400 animate-spin" />
+          </div>
+        ) : displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
-            {trackedItems.length === 0 ? (
-              <>
-                <AlertTriangle size={32} className="text-gray-300" />
-                <p className="text-sm text-gray-500">No items being tracked</p>
-                <p className="text-xs text-gray-400">
-                  Price changes from Smart Retail will appear automatically.
-                  {'\n'}Tap + to manually track an item.
-                </p>
-              </>
-            ) : listSearch.trim() ? (
-              <p className="text-sm text-gray-400">No results for "{listSearch}"</p>
-            ) : (
-              <p className="text-sm text-gray-400">No {filter} items</p>
-            )}
+            <DollarSign size={32} className="text-gray-300" />
+            <p className="text-sm text-gray-500">
+              {listSearch.trim() ? `No results for "${listSearch}"` : 'No user price changes found'}
+            </p>
+            <p className="text-xs text-gray-400">
+              Manual price changes on liquor products will appear here automatically
+            </p>
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {filtered.map((item, idx) => (
-              <div key={item.id} className="flex items-center">
-                {reordering && (
-                  <div className="flex flex-col pl-2 shrink-0">
-                    <button
-                      onClick={() => handleMove(idx, -1)}
-                      disabled={idx === 0}
-                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
-                    >
-                      <ChevronUp size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleMove(idx, 1)}
-                      disabled={idx === filtered.length - 1}
-                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
-                    >
-                      <ChevronDown size={16} />
-                    </button>
-                  </div>
-                )}
-                <button
-                  onClick={() => !reordering && setSelectedItem(item)}
-                  className={`flex-1 flex items-center gap-3 p-3 text-left ${reordering ? '' : 'hover:bg-gray-50'}`}
-                >
+            {displayed.map(item => {
+              const priceDiff = item.newPrice - item.oldPrice
+              const pctChange = item.oldPrice > 0 ? (priceDiff / item.oldPrice) * 100 : 0
+              return (
+                <div key={`${item.itemCode}-${item.changeDate}`} className="flex items-center gap-3 p-3">
                   <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-gray-400">
-                        {fmtPrice(item.originalPrice)} → <span className="text-violet-600 font-medium">{fmtPrice(item.newPrice)}</span>
+                        {fmtPrice(item.oldPrice)} → <span className={priceDiff > 0 ? 'text-red-500 font-medium' : 'text-green-600 font-medium'}>{fmtPrice(item.newPrice)}</span>
                       </span>
-                      <span className="text-[10px] text-gray-300">{fmtDate(item.changeDate)}</span>
+                      <span className={`text-[10px] font-medium ${priceDiff > 0 ? 'text-red-400' : 'text-green-500'}`}>
+                        {priceDiff > 0 ? '+' : ''}{pctChange.toFixed(1)}%
+                      </span>
                     </div>
-                    {item.tags && item.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-0.5 mt-0.5">
-                        {item.tags.map(tag => <TagBadge key={tag} tag={tag} />)}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-gray-300">{fmtDate(item.changeDate)}</span>
+                      <span className="text-[10px] text-blue-500">{item.changedBy}</span>
+                      <span className="text-[10px] text-gray-300">{item.department}</span>
+                    </div>
                   </div>
-                  {!reordering && <PriceStatusBadge status={item.status} revertedAt={item.revertedAt} />}
-                </button>
-              </div>
-            ))}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
-
-      {/* FAB */}
-      <button
-        onClick={() => setShowAdd(true)}
-        className="absolute bottom-20 right-4 w-12 h-12 bg-violet-600 text-white rounded-full shadow-lg flex items-center justify-center"
-      >
-        <Plus size={22} />
-      </button>
-
-      {showAdd && <AddItemSheet onClose={() => setShowAdd(false)} />}
     </div>
   )
 }
@@ -2013,7 +1393,7 @@ export default function TrackingView() {
       </p>
 
       {/* Content */}
-      {mode === 'host' ? <PromoTrackingList /> : <PriceTrackingList />}
+      {mode === 'host' ? <PromoTrackingList /> : <UserChangesList />}
     </div>
   )
 }
