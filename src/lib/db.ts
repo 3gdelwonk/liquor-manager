@@ -42,6 +42,7 @@ export interface TrackedPromo {
   endDate: string            // ISO date
   daysLeft: number
   notes: string
+  source?: 'system' | 'manual'   // system = from POS API (host/system promo), manual = user-entered
   status: 'active' | 'ended' | 'completed'
   sortOrder?: number
   createdAt: Date

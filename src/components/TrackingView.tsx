@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus, Search, ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle,
   CheckCircle, XCircle, ScanBarcode, Bell, X, RefreshCw, Tag, DollarSign, Calendar,
-  ChevronUp, ChevronDown, ArrowUpDown
+  ChevronUp, ChevronDown, ArrowUpDown, Edit3
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { db, type TrackedItem, type TrackedPromo } from '../lib/db'
@@ -225,12 +225,41 @@ async function assignOrderIfNeeded(
 
 const MAX_PROMO_RESULTS = 30
 
+function promoTimingBadge(startDate: string | null | undefined, endDate: string | null | undefined): { label: string; className: string } {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const start = parseDate(startDate)
+  const end = parseDate(endDate)
+  if (!isNaN(start.getTime()) && start > today) {
+    return { label: 'Upcoming', className: 'bg-amber-100 text-amber-700' }
+  }
+  if (!isNaN(end.getTime()) && end < today) {
+    return { label: 'Ended', className: 'bg-gray-100 text-gray-500' }
+  }
+  return { label: 'Active', className: 'bg-green-100 text-green-700' }
+}
+
+type PromoSheetView = 'list' | 'manual'
+
 function AddPromoSheet({ onClose }: { onClose: () => void }) {
   const [livePromos, setLivePromos] = useState<LivePromotion[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [saving, setSaving] = useState<string | null>(null)
+  const [view, setView] = useState<PromoSheetView>('list')
+
+  // Manual entry state
+  const [manualSearch, setManualSearch] = useState('')
+  const [manualDebouncedSearch, setManualDebouncedSearch] = useState('')
+  const [manualResults, setManualResults] = useState<{ itemCode: string; description: string; department: string; barcode: string | null; sellPrice: number }[]>([])
+  const [manualLoading, setManualLoading] = useState(false)
+  const [manualSelected, setManualSelected] = useState<{ itemCode: string; description: string; department: string; barcode: string | null; sellPrice: number } | null>(null)
+  const [manualNormalPrice, setManualNormalPrice] = useState('')
+  const [manualPromoPrice, setManualPromoPrice] = useState('')
+  const [manualStartDate, setManualStartDate] = useState('')
+  const [manualEndDate, setManualEndDate] = useState('')
+  const [manualSaving, setManualSaving] = useState(false)
 
   const existingPromos = useLiveQuery(() => db.trackedPromos.toArray(), [])
   const existingCodes = useMemo(() => new Set((existingPromos ?? []).map(p => p.itemCode)), [existingPromos])
@@ -247,6 +276,74 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
     const timer = setTimeout(() => setDebouncedSearch(search), 250)
     return () => clearTimeout(timer)
   }, [search])
+
+  // Manual entry: debounce + search items
+  useEffect(() => {
+    const timer = setTimeout(() => setManualDebouncedSearch(manualSearch), 300)
+    return () => clearTimeout(timer)
+  }, [manualSearch])
+
+  useEffect(() => {
+    if (!manualDebouncedSearch.trim()) { setManualResults([]); return }
+    let cancelled = false
+    setManualLoading(true)
+    searchItems(manualDebouncedSearch, 20)
+      .then(res => {
+        if (!cancelled) {
+          setManualResults(res.items.map(i => ({
+            itemCode: i.itemCode,
+            description: i.description,
+            department: i.department,
+            barcode: i.barcode ?? null,
+            sellPrice: i.sellPrice ?? 0,
+          })))
+        }
+      })
+      .catch(() => { if (!cancelled) setManualResults([]) })
+      .finally(() => { if (!cancelled) setManualLoading(false) })
+    return () => { cancelled = true }
+  }, [manualDebouncedSearch])
+
+  async function handleManualSave() {
+    if (!manualSelected || !manualStartDate || !manualEndDate) return
+    setManualSaving(true)
+    const np = parseFloat(manualNormalPrice) || manualSelected.sellPrice
+    const pp = parseFloat(manualPromoPrice) || np
+    const discount = np > 0 ? ((np - pp) / np) * 100 : 0
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const end = parseDate(manualEndDate)
+    const daysLeft = !isNaN(end.getTime()) ? Math.max(0, Math.ceil((end.getTime() - today.getTime()) / 86400000)) : 0
+    await db.trackedPromos.add({
+      itemCode: manualSelected.itemCode,
+      barcode: manualSelected.barcode,
+      description: manualSelected.description,
+      department: manualSelected.department,
+      normalPrice: np,
+      promoPrice: pp,
+      promoUnitCost: null,
+      normalUnitCost: 0,
+      ctnQty: 1,
+      discountPercent: discount,
+      marginPercent: 0,
+      costSavingPercent: null,
+      startDate: manualStartDate,
+      endDate: manualEndDate,
+      daysLeft,
+      notes: '',
+      source: 'manual',
+      status: 'active',
+      createdAt: new Date(),
+    })
+    setManualSaving(false)
+    setManualSelected(null)
+    setManualSearch('')
+    setManualNormalPrice('')
+    setManualPromoPrice('')
+    setManualStartDate('')
+    setManualEndDate('')
+    setView('list')
+  }
 
   const { filtered, totalMatches } = useMemo(() => {
     if (!livePromos) return { filtered: [], totalMatches: 0 }
@@ -297,6 +394,7 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
       endDate: promo.endDate,
       daysLeft: promo.daysLeft,
       notes: '',
+      source: 'system',
       status: 'active',
       createdAt: new Date(),
     })
@@ -311,55 +409,218 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
           <h2 className="text-base font-semibold text-gray-900">Track a Promotion</h2>
           <button onClick={onClose} className="text-gray-400 text-lg leading-none">✕</button>
         </div>
-        <p className="text-xs text-gray-400">Select from live host/system promotions to track performance</p>
 
-        <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search promotions..."
-            className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
+        {/* View toggle: Live promos vs Manual entry */}
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+          <button
+            onClick={() => setView('list')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${view === 'list' ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500'}`}
+          >
+            <Tag size={12} />
+            Live Promos
+          </button>
+          <button
+            onClick={() => setView('manual')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${view === 'manual' ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500'}`}
+          >
+            <Edit3 size={12} />
+            Manual Entry
+          </button>
         </div>
 
-        {loading ? (
-          <div className="flex justify-center py-8"><RefreshCw size={20} className="text-violet-400 animate-spin" /></div>
-        ) : filtered.length === 0 ? (
-          <p className="text-xs text-gray-400 text-center py-6">
-            {search ? 'No matching promotions' : 'All live promotions are already being tracked'}
-          </p>
+        {view === 'list' ? (
+          <>
+            <p className="text-xs text-gray-400">Select from live host/system promotions to track performance</p>
+
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search promotions..."
+                className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+            </div>
+
+            {loading ? (
+              <div className="flex justify-center py-8"><RefreshCw size={20} className="text-violet-400 animate-spin" /></div>
+            ) : filtered.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">
+                {search ? 'No matching promotions' : 'All live promotions are already being tracked'}
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-[50vh] overflow-auto">
+                {filtered.map(promo => {
+                  const badge = promoTimingBadge(promo.startDate, promo.endDate)
+                  return (
+                    <div key={promo.itemCode} className="flex items-center gap-2.5 p-2.5 border border-gray-100 rounded-lg">
+                      <ProductImage itemCode={promo.itemCode} description={promo.description} department={promo.department} size={40} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-medium text-gray-900 truncate">{promo.description}</p>
+                          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${badge.className}`}>
+                            {badge.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-gray-400">
+                            {fmtPrice(promo.normalPrice)} → <span className="text-green-600 font-medium">{fmtPrice(promo.promoPrice)}</span>
+                          </span>
+                          <span className="text-[10px] text-green-600 font-medium">{promo.discountPercent.toFixed(0)}% off</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-gray-400">{fmtDate(promo.startDate)} → {fmtDate(promo.endDate)}</span>
+                          {badge.label === 'Upcoming'
+                            ? <span className="text-[10px] text-amber-600">Starts in {Math.ceil((parseDate(promo.startDate).getTime() - Date.now()) / 86400000)}d</span>
+                            : <span className="text-[10px] text-gray-400">{promo.daysLeft}d left</span>
+                          }
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleTrack(promo)}
+                        disabled={saving === promo.itemCode}
+                        className="px-3 py-1.5 bg-violet-600 text-white text-[10px] font-medium rounded-lg shrink-0 disabled:opacity-50"
+                      >
+                        {saving === promo.itemCode ? '...' : 'Track'}
+                      </button>
+                    </div>
+                  )
+                })}
+                {totalMatches > MAX_PROMO_RESULTS && (
+                  <p className="text-[10px] text-gray-400 text-center py-2">
+                    Showing {MAX_PROMO_RESULTS} of {totalMatches} — type more to narrow results
+                  </p>
+                )}
+              </div>
+            )}
+          </>
         ) : (
-          <div className="space-y-1.5 max-h-[50vh] overflow-auto">
-            {filtered.map(promo => (
-              <div key={promo.itemCode} className="flex items-center gap-2.5 p-2.5 border border-gray-100 rounded-lg">
-                <ProductImage itemCode={promo.itemCode} description={promo.description} department={promo.department} size={40} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-gray-900 truncate">{promo.description}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-gray-400">
-                      {fmtPrice(promo.normalPrice)} → <span className="text-green-600 font-medium">{fmtPrice(promo.promoPrice)}</span>
-                    </span>
-                    <span className="text-[10px] text-green-600 font-medium">{promo.discountPercent.toFixed(0)}% off</span>
+          /* ── Manual promo entry ── */
+          <div className="space-y-3">
+            <p className="text-xs text-gray-400">Manually add a promotion for items not yet in the system</p>
+
+            {!manualSelected ? (
+              <>
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={manualSearch}
+                    onChange={e => setManualSearch(e.target.value)}
+                    placeholder="Search product to add..."
+                    className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  />
+                </div>
+                {manualLoading && (
+                  <div className="flex justify-center py-4"><RefreshCw size={16} className="text-violet-400 animate-spin" /></div>
+                )}
+                {!manualLoading && manualResults.length > 0 && (
+                  <div className="space-y-1 max-h-[40vh] overflow-auto">
+                    {manualResults.filter(r => !existingCodes.has(r.itemCode)).map(item => (
+                      <button
+                        key={item.itemCode}
+                        onClick={() => {
+                          setManualSelected(item)
+                          setManualNormalPrice(item.sellPrice.toFixed(2))
+                        }}
+                        className="w-full flex items-center gap-2.5 p-2.5 border border-gray-100 rounded-lg text-left hover:bg-gray-50"
+                      >
+                        <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} size={36} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-900 truncate">{item.description}</p>
+                          <p className="text-[10px] text-gray-400">{item.department} · {fmtPrice(item.sellPrice)}</p>
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-gray-400">{fmtDate(promo.startDate)} → {fmtDate(promo.endDate)}</span>
-                    <span className="text-[10px] text-gray-400">{promo.daysLeft}d left</span>
+                )}
+                {!manualLoading && manualSearch.trim() && manualResults.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-4">No products found</p>
+                )}
+              </>
+            ) : (
+              <div className="space-y-3">
+                {/* Selected product */}
+                <div className="flex items-center gap-2.5 p-2.5 bg-violet-50 rounded-lg">
+                  <ProductImage itemCode={manualSelected.itemCode} description={manualSelected.description} department={manualSelected.department} size={36} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-900 truncate">{manualSelected.description}</p>
+                    <p className="text-[10px] text-gray-400">{manualSelected.department}</p>
+                  </div>
+                  <button onClick={() => setManualSelected(null)} className="text-gray-400 p-1"><X size={14} /></button>
+                </div>
+
+                {/* Price inputs */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium">Normal Price</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={manualNormalPrice}
+                      onChange={e => setManualNormalPrice(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium">Promo Price</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={manualPromoPrice}
+                      onChange={e => setManualPromoPrice(e.target.value)}
+                      placeholder="Enter promo price"
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm"
+                    />
                   </div>
                 </div>
+
+                {/* Date inputs */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium">Start Date</label>
+                    <input
+                      type="date"
+                      value={manualStartDate}
+                      onChange={e => setManualStartDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium">End Date</label>
+                    <input
+                      type="date"
+                      value={manualEndDate}
+                      onChange={e => setManualEndDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+
+                {/* Discount preview */}
+                {manualPromoPrice && manualNormalPrice && (
+                  <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-2 flex items-center justify-between">
+                    <span>Discount</span>
+                    <span className="text-green-600 font-medium">
+                      {((1 - parseFloat(manualPromoPrice) / parseFloat(manualNormalPrice)) * 100).toFixed(1)}% off
+                    </span>
+                  </div>
+                )}
+
+                {manualStartDate && parseDate(manualStartDate) > new Date() && (
+                  <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2 flex items-center gap-1.5">
+                    <Calendar size={12} />
+                    This promotion hasn't started yet — it will be tracked as upcoming
+                  </div>
+                )}
+
                 <button
-                  onClick={() => handleTrack(promo)}
-                  disabled={saving === promo.itemCode}
-                  className="px-3 py-1.5 bg-violet-600 text-white text-[10px] font-medium rounded-lg shrink-0 disabled:opacity-50"
+                  onClick={handleManualSave}
+                  disabled={manualSaving || !manualPromoPrice || !manualStartDate || !manualEndDate}
+                  className="w-full py-2 bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
                 >
-                  {saving === promo.itemCode ? '...' : 'Track'}
+                  {manualSaving ? 'Saving...' : 'Track This Promotion'}
                 </button>
               </div>
-            ))}
-            {totalMatches > MAX_PROMO_RESULTS && (
-              <p className="text-[10px] text-gray-400 text-center py-2">
-                Showing {MAX_PROMO_RESULTS} of {totalMatches} — type more to narrow results
-              </p>
             )}
           </div>
         )}
@@ -459,7 +720,14 @@ function PromoDetail({ item, onBack, onUpdate }: {
       <div className="flex items-center gap-3">
         <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={48} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">{item.description}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-semibold text-gray-900 truncate">{item.description}</p>
+            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
+              item.source === 'manual' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'
+            }`}>
+              {item.source === 'manual' ? 'Manual' : 'System'}
+            </span>
+          </div>
           <p className="text-xs text-gray-400">{item.department} &middot; {item.itemCode}</p>
         </div>
         <PromoStatusBadge status={item.status} endDate={item.endDate} />
@@ -712,7 +980,14 @@ function PromoTrackingList() {
                 >
                   <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
+                      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
+                        item.source === 'manual' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'
+                      }`}>
+                        {item.source === 'manual' ? 'Manual' : 'System'}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className="text-xs text-gray-400">
                         {fmtPrice(item.normalPrice)} → <span className="text-green-600 font-medium">{fmtPrice(item.promoPrice)}</span>
