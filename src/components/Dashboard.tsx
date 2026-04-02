@@ -20,7 +20,7 @@ function KpiCard({ icon, label, value, sub }: { icon: React.ReactNode; label: st
   )
 }
 
-export default function Dashboard({ onNavigateToImport }: { onNavigateToImport: () => void }) {
+export default function Dashboard() {
   const products = useLiveQuery(() => db.products.toArray(), [])
   const snapshots = useLiveQuery(() => db.stockSnapshots.toArray(), [])
   const salesRecords = useLiveQuery(() => db.salesRecords.toArray(), [])
@@ -101,10 +101,9 @@ export default function Dashboard({ onNavigateToImport }: { onNavigateToImport: 
       <div className="flex flex-col items-center justify-center h-full gap-4 p-6 text-center">
         <Package size={48} className="text-gray-200" />
         <div>
-          <p className="text-sm font-medium text-gray-600">No products yet</p>
-          <p className="text-xs text-gray-400 mt-1">Import a Smart Retail Item Maintenance file to get started</p>
+          <p className="text-sm font-medium text-gray-600">No local products</p>
+          <p className="text-xs text-gray-400 mt-1">Data is fetched live from JARVISmart — check your connection in Settings</p>
         </div>
-        <button onClick={onNavigateToImport} className="text-sm text-violet-600 font-medium underline">Go to Import</button>
       </div>
     )
   }
@@ -207,7 +206,7 @@ export default function Dashboard({ onNavigateToImport }: { onNavigateToImport: 
           {(['item_maintenance', 'stock_report', 'sales'] as const).map((type) => {
             const entry = data.lastImports[type]
             return (
-              <button key={type} onClick={onNavigateToImport} className="w-full flex items-center gap-2 p-2.5 bg-gray-50 rounded-lg text-left">
+              <div key={type} className="w-full flex items-center gap-2 p-2.5 bg-gray-50 rounded-lg text-left">
                 <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                   type === 'item_maintenance' ? 'bg-violet-100 text-violet-700' :
                   type === 'stock_report' ? 'bg-blue-100 text-blue-700' :
@@ -218,7 +217,7 @@ export default function Dashboard({ onNavigateToImport }: { onNavigateToImport: 
                 <span className="text-xs text-gray-500 flex-1">
                   {entry ? `${entry.recordCount} records · ${new Date(entry.importedAt).toLocaleDateString('en-AU')}` : 'Never imported'}
                 </span>
-              </button>
+              </div>
             )
           })}
         </div>
