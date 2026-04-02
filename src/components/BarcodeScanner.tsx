@@ -33,14 +33,14 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         (decodedText) => {
           if (!activeRef.current) return
           activeRef.current = false
-          // Await stop before notifying parent to prevent race conditions
+          // Fire-and-forget stop — do NOT await, or it deadlocks
+          // (stop waits for this callback to return, callback waits for stop)
+          scannerRef.current = null
           scanner.stop()
             .then(() => { try { scanner.clear() } catch {} })
-            .catch(() => {})
-            .finally(() => {
-              scannerRef.current = null
-              onScanRef.current(decodedText)
-            })
+            .catch(() => { try { scanner.clear() } catch {} })
+          // Notify parent immediately
+          onScanRef.current(decodedText)
         },
         () => {},
       )
@@ -64,14 +64,13 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     activeRef.current = false
     const s = scannerRef.current
     scannerRef.current = null
+    // Fire-and-forget stop, close immediately
     if (s) {
       s.stop()
         .then(() => { try { s.clear() } catch {} })
         .catch(() => { try { s.clear() } catch {} })
-        .finally(() => onCloseRef.current())
-    } else {
-      onCloseRef.current()
     }
+    onCloseRef.current()
   }
 
   if (!open) return null
