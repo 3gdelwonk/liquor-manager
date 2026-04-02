@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
-import { Search, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState, useMemo, useCallback } from 'react'
+import { Search, ChevronDown, ChevronUp, ScanBarcode } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import BarcodeScanner from './BarcodeScanner'
 import { db } from '../lib/db'
 import { getLatestQoh } from '../lib/analytics'
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
@@ -69,10 +70,11 @@ function ProductRow({ product, qoh, activePromo, isTracked }: { product: Product
               {activePromo && <span className="text-xs font-medium px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full shrink-0">PROMO</span>}
               {isTracked && <span className="text-xs font-medium px-1.5 py-0.5 bg-cyan-100 text-cyan-700 rounded-full shrink-0">TRACKING</span>}
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ background: CATEGORY_COLORS[product.category] + '22', color: CATEGORY_COLORS[product.category] }}>
                 {CATEGORY_LABELS[product.category]}
               </span>
+              <span className="text-xs text-gray-400 font-mono">{product.invoiceCode || product.barcode}</span>
               {product.abv && <span className="text-xs text-gray-400">{product.abv}%</span>}
               {product.bottleSize && <span className="text-xs text-gray-400">{product.bottleSize}ml</span>}
             </div>
@@ -90,6 +92,11 @@ function ProductRow({ product, qoh, activePromo, isTracked }: { product: Product
 
       {expanded && (
         <div className="pb-3 space-y-3">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+            <div><span className="text-gray-400">Barcode:</span> <span className="font-mono">{product.barcode}</span></div>
+            <div><span className="text-gray-400">Order Code:</span> <span className="font-mono">{product.invoiceCode}</span></div>
+            {product.itemNumber && <div><span className="text-gray-400">Item #:</span> <span className="font-mono">{product.itemNumber}</span></div>}
+          </div>
           <div className="grid grid-cols-2 gap-2">
             {[
               { label: 'Min Stock', key: 'minStockLevel', type: 'number' },
@@ -142,6 +149,12 @@ export default function ProductsView() {
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState<LiquorCategory | 'all'>('all')
   const [sort, setSort] = useState<SortKey>('name')
+  const [scannerOpen, setScannerOpen] = useState(false)
+
+  const handleScan = useCallback((code: string) => {
+    setScannerOpen(false)
+    setSearch(code)
+  }, [])
 
   const { latestQoh, activePromoIds } = useMemo(() => {
     const lq = snapshots ? getLatestQoh(snapshots) : new Map<number, number>()
@@ -158,7 +171,10 @@ export default function ProductsView() {
   const filtered = useMemo(() => {
     if (!products) return []
     let list = products
-    if (search) list = list.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.barcode.includes(search))
+    if (search) {
+      const q = search.toLowerCase()
+      list = list.filter(p => p.name.toLowerCase().includes(q) || p.barcode.includes(search) || p.invoiceCode.toLowerCase().includes(q) || (p.itemNumber && p.itemNumber.toLowerCase().includes(q)))
+    }
     if (catFilter !== 'all') list = list.filter(p => p.category === catFilter)
 
     return list.sort((a, b) => {
@@ -193,14 +209,23 @@ export default function ProductsView() {
     <div className="flex flex-col h-full">
       {/* Sticky header */}
       <div className="sticky top-0 bg-white z-10 border-b border-gray-100 px-4 pt-3 pb-2 space-y-2">
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search products…"
-            className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, barcode, order code…"
+              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </div>
+          <button
+            onClick={() => setScannerOpen(true)}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50"
+            title="Scan barcode"
+          >
+            <ScanBarcode size={18} />
+          </button>
         </div>
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
           <button
@@ -248,6 +273,7 @@ export default function ProductsView() {
         {filtered.length === 0 && <p className="text-center text-sm text-gray-400 py-8">No products match filters</p>}
         <div className="h-8" />
       </div>
+      <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
     </div>
   )
 }

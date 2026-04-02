@@ -406,7 +406,8 @@ export default function LiveSalesView() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-gray-800 truncate">{item.description}</p>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                          <span className="text-xs text-gray-400">{item.itemCode}</span>
+                          <span className="text-xs text-gray-400 font-mono">{item.itemCode}</span>
+                          {item.barcode && <span className="text-xs text-gray-300 font-mono">· {item.barcode}</span>}
                           <span
                             className="text-xs px-1.5 py-0.5 rounded font-medium"
                             style={{

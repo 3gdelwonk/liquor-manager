@@ -1176,6 +1176,10 @@ function PromoTrackingList() {
                         {item.source === 'manual' ? 'Manual' : 'System'}
                       </span>
                     </div>
+                    <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
+                      <span>{item.itemCode}</span>
+                      {item.barcode && <span>· {item.barcode}</span>}
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className="text-xs text-gray-400">
                         {fmtPrice(item.normalPrice)} → <span className="text-green-600 font-medium">{fmtPrice(item.promoPrice)}</span>
@@ -1509,6 +1513,10 @@ function UserChangesList() {
                   <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
+                      <span>{item.itemCode}</span>
+                      {item.barcode && <span>· {item.barcode}</span>}
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs text-gray-400">
                         {fmtPrice(item.oldPrice)} → <span className={priceDiff > 0 ? 'text-red-500 font-medium' : 'text-green-600 font-medium'}>{fmtPrice(item.newPrice)}</span>

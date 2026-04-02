@@ -63,6 +63,11 @@ function PromoCard({ promo, isUpcoming, isTracked }: { promo: LivePromotion; isU
         {isTracked && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-cyan-100 text-cyan-700">TRACKING</span>}
       </div>
 
+      {/* Codes */}
+      <div className="flex items-center gap-2 text-[10px] text-gray-400">
+        <span className="font-mono">{promo.itemCode}</span>
+      </div>
+
       {/* SELL row */}
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-bold text-green-600 w-8 shrink-0">SELL</span>
