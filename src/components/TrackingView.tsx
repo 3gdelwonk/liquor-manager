@@ -8,11 +8,12 @@ import {
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { db, type TrackedPromo } from '../lib/db'
 import {
-  searchItems, getItemSales,
+  searchItems, getItemSales, getStockLevels,
   getRecentPriceChanges, getPromotions, LIQUOR_DEPT_NAMES
 } from '../lib/jarvis'
 import type { ItemSalesData, DailySale, LivePromotion } from '../lib/jarvis'
 import ProductImage from './ProductImage'
+import BarcodeStripe from './BarcodeStripe'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 
 type TrackMode = 'host' | 'user'
@@ -525,9 +526,15 @@ function AddPromoSheet({ onClose }: { onClose: () => void }) {
 
   async function handleTrack(promo: LivePromotion) {
     setSaving(promo.itemCode)
+    // Look up barcode from stock API before saving
+    let barcode: string | null = null
+    try {
+      const stock = await getStockLevels({ itemCode: promo.itemCode })
+      barcode = stock[0]?.barcode ?? null
+    } catch { /* offline — save without barcode */ }
     await db.trackedPromos.add({
       itemCode: promo.itemCode,
-      barcode: null,
+      barcode,
       description: promo.description,
       department: promo.department,
       normalPrice: promo.normalPrice,
@@ -806,6 +813,7 @@ function PromoDetail({ item, onBack, onUpdate }: {
 }) {
   const [salesData, setSalesData] = useState<ItemSalesData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [resolvedBarcode, setResolvedBarcode] = useState<string | null>(item.barcode)
   const { getOrderCode } = useProductCodeLookup()
 
   useEffect(() => {
@@ -813,6 +821,17 @@ function PromoDetail({ item, onBack, onUpdate }: {
     async function load() {
       setLoading(true)
       try {
+        // Resolve barcode if missing
+        if (!item.barcode) {
+          const stock = await getStockLevels({ itemCode: item.itemCode }).catch(() => [])
+          const bc = stock[0]?.barcode ?? null
+          if (!cancelled && bc) {
+            setResolvedBarcode(bc)
+            // Backfill DB so future opens don't re-fetch
+            if (item.id) db.trackedPromos.update(item.id, { barcode: bc }).catch(() => {})
+          }
+        }
+
         const sales = await getItemSales(item.itemCode, 90).catch(() => null)
         if (cancelled) return
         setSalesData(sales)
@@ -878,14 +897,20 @@ function PromoDetail({ item, onBack, onUpdate }: {
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-gray-400 font-mono">
-            {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
-            {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
+            {(() => { const oc = getOrderCode(resolvedBarcode); return oc ? <span>#{oc}</span> : null })()}
             <span className="text-gray-300">{item.itemCode}</span>
           </div>
           <p className="text-xs text-gray-400">{item.department}</p>
         </div>
         <PromoStatusBadge status={item.status} endDate={item.endDate} />
       </div>
+
+      {/* Barcode stripe */}
+      {resolvedBarcode && (
+        <div className="bg-white border border-gray-100 rounded-xl p-3 flex flex-col items-center">
+          <BarcodeStripe value={resolvedBarcode} height={44} />
+        </div>
+      )}
 
       {/* Promo Period */}
       <div className="bg-violet-50 rounded-xl p-3 space-y-2">
@@ -1247,15 +1272,27 @@ function UserChangeDetail({ item, onBack }: { item: UserChange; onBack: () => vo
   const [salesData, setSalesData] = useState<ItemSalesData | null>(null)
   const [loading, setLoading] = useState(true)
   const [chartMode, setChartMode] = useState<ChartMode>('weekly')
+  const [resolvedBarcode, setResolvedBarcode] = useState<string | null>(item.barcode)
   const { getOrderCode } = useProductCodeLookup()
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    getItemSales(item.itemCode, 90)
-      .then(data => { if (!cancelled) setSalesData(data) })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false) })
+    async function load() {
+      // Resolve barcode if missing
+      if (!item.barcode) {
+        try {
+          const stock = await getStockLevels({ itemCode: item.itemCode })
+          if (!cancelled && stock[0]?.barcode) setResolvedBarcode(stock[0].barcode)
+        } catch { /* offline */ }
+      }
+      try {
+        const data = await getItemSales(item.itemCode, 90)
+        if (!cancelled) setSalesData(data)
+      } catch { /* API error */ }
+      if (!cancelled) setLoading(false)
+    }
+    load()
     return () => { cancelled = true }
   }, [item.itemCode])
 
@@ -1306,13 +1343,19 @@ function UserChangeDetail({ item, onBack }: { item: UserChange; onBack: () => vo
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-900 truncate">{item.description}</p>
           <div className="flex items-center gap-1.5 text-[10px] text-gray-400 font-mono">
-            {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
-            {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
+            {(() => { const oc = getOrderCode(resolvedBarcode); return oc ? <span>#{oc}</span> : null })()}
             <span className="text-gray-300">{item.itemCode}</span>
           </div>
           <p className="text-xs text-gray-400">{item.department}</p>
         </div>
       </div>
+
+      {/* Barcode stripe */}
+      {resolvedBarcode && (
+        <div className="bg-white border border-gray-100 rounded-xl p-3 flex flex-col items-center">
+          <BarcodeStripe value={resolvedBarcode} height={44} />
+        </div>
+      )}
 
       {/* Price Change Summary */}
       <div className="bg-gray-50 rounded-xl p-4 space-y-2">

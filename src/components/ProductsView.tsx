@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { Search, ChevronDown, ChevronUp, ScanBarcode } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import BarcodeScanner from './BarcodeScanner'
+import BarcodeStripe from './BarcodeStripe'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import { db } from '../lib/db'
 import { getLatestQoh } from '../lib/analytics'
@@ -94,10 +95,14 @@ function ProductRow({ product, qoh, activePromo, isTracked }: { product: Product
 
       {expanded && (
         <div className="pb-3 space-y-3">
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-            <div><span className="text-gray-400">Barcode:</span> <span className="font-mono">{product.barcode}</span></div>
-            <div><span className="text-gray-400">Order Code:</span> <span className="font-mono">{product.invoiceCode}</span></div>
-            {product.itemNumber && <div><span className="text-gray-400">Item #:</span> <span className="font-mono">{product.itemNumber}</span></div>}
+          <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-2">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+              {product.itemNumber && <div><span className="text-gray-400">Order Code:</span> <span className="font-mono font-medium">{product.itemNumber}</span></div>}
+              <div><span className="text-gray-400">POS:</span> <span className="font-mono">{product.invoiceCode}</span></div>
+            </div>
+            <div className="flex justify-center">
+              <BarcodeStripe value={product.barcode} height={44} />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {[
