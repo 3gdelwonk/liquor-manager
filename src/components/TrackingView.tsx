@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus, Search, ArrowLeft, TrendingUp, TrendingDown, Minus, AlertTriangle,
   CheckCircle, XCircle, ScanBarcode, Bell, X, RefreshCw, Tag, DollarSign, Calendar,
-  ChevronUp, ChevronDown, ArrowUpDown, Edit3
+  ChevronUp, ChevronDown, ArrowUpDown, Edit3, MessageSquare
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { db, type TrackedItem, type TrackedPromo } from '../lib/db'
@@ -217,6 +217,156 @@ async function assignOrderIfNeeded(
       }
     })
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Notes & Tags — shared between promo and price detail views
+// ════════════════════════════════════════════════════════════════════════════
+
+const PRESET_TAGS = [
+  { label: 'Best Seller', color: 'bg-green-100 text-green-700' },
+  { label: 'Slow Mover', color: 'bg-red-100 text-red-700' },
+  { label: 'Seasonal', color: 'bg-amber-100 text-amber-700' },
+  { label: 'New Line', color: 'bg-blue-100 text-blue-700' },
+  { label: 'Clearance', color: 'bg-pink-100 text-pink-700' },
+  { label: 'High Margin', color: 'bg-emerald-100 text-emerald-700' },
+  { label: 'Low Margin', color: 'bg-orange-100 text-orange-700' },
+  { label: 'Watch', color: 'bg-violet-100 text-violet-700' },
+]
+
+function getTagColor(tag: string): string {
+  const preset = PRESET_TAGS.find(t => t.label === tag)
+  return preset?.color ?? 'bg-gray-100 text-gray-600'
+}
+
+function TagBadge({ tag, onRemove }: { tag: string; onRemove?: () => void }) {
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${getTagColor(tag)}`}>
+      {tag}
+      {onRemove && (
+        <button onClick={onRemove} className="ml-0.5 hover:opacity-70"><X size={10} /></button>
+      )}
+    </span>
+  )
+}
+
+function NotesAndTags({ notes, tags, onSaveNotes, onSaveTags }: {
+  notes: string
+  tags: string[]
+  onSaveNotes: (notes: string) => void
+  onSaveTags: (tags: string[]) => void
+}) {
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [notesDraft, setNotesDraft] = useState(notes)
+  const [customTag, setCustomTag] = useState('')
+
+  function handleSaveNotes() {
+    onSaveNotes(notesDraft)
+    setEditingNotes(false)
+  }
+
+  function toggleTag(label: string) {
+    if (tags.includes(label)) {
+      onSaveTags(tags.filter(t => t !== label))
+    } else {
+      onSaveTags([...tags, label])
+    }
+  }
+
+  function addCustomTag() {
+    const trimmed = customTag.trim()
+    if (trimmed && !tags.includes(trimmed)) {
+      onSaveTags([...tags, trimmed])
+    }
+    setCustomTag('')
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Notes */}
+      <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <MessageSquare size={12} className="text-gray-400" />
+            <span className="text-xs font-semibold text-gray-500 uppercase">Notes</span>
+          </div>
+          {!editingNotes && (
+            <button onClick={() => { setNotesDraft(notes); setEditingNotes(true) }} className="text-[10px] text-violet-600 font-medium">
+              {notes ? 'Edit' : 'Add Note'}
+            </button>
+          )}
+        </div>
+        {editingNotes ? (
+          <div className="space-y-1.5">
+            <textarea
+              value={notesDraft}
+              onChange={e => setNotesDraft(e.target.value)}
+              placeholder="Add notes about this product..."
+              rows={3}
+              className="w-full px-2.5 py-2 border border-gray-200 rounded-lg text-xs resize-none focus:outline-none focus:ring-2 focus:ring-violet-300"
+              autoFocus
+            />
+            <div className="flex gap-1.5 justify-end">
+              <button onClick={() => setEditingNotes(false)} className="px-2.5 py-1 text-[10px] text-gray-500 font-medium">Cancel</button>
+              <button onClick={handleSaveNotes} className="px-2.5 py-1 bg-violet-600 text-white text-[10px] font-medium rounded-lg">Save</button>
+            </div>
+          </div>
+        ) : notes ? (
+          <p className="text-xs text-gray-600 whitespace-pre-wrap">{notes}</p>
+        ) : (
+          <p className="text-[10px] text-gray-300 italic">No notes yet</p>
+        )}
+      </div>
+
+      {/* Tags */}
+      <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+        <div className="flex items-center gap-1.5">
+          <Tag size={12} className="text-gray-400" />
+          <span className="text-xs font-semibold text-gray-500 uppercase">Tags</span>
+        </div>
+
+        {/* Current tags */}
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {tags.map(tag => (
+              <TagBadge key={tag} tag={tag} onRemove={() => toggleTag(tag)} />
+            ))}
+          </div>
+        )}
+
+        {/* Preset tag chips */}
+        <div className="flex flex-wrap gap-1">
+          {PRESET_TAGS.filter(t => !tags.includes(t.label)).map(t => (
+            <button
+              key={t.label}
+              onClick={() => toggleTag(t.label)}
+              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border border-dashed border-gray-300 text-gray-400 hover:border-violet-400 hover:text-violet-600 transition-colors`}
+            >
+              + {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Custom tag input */}
+        <div className="flex gap-1">
+          <input
+            value={customTag}
+            onChange={e => setCustomTag(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addCustomTag()}
+            placeholder="Custom tag..."
+            className="flex-1 px-2 py-1 border border-gray-200 rounded-lg text-[11px] focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+          <button
+            onClick={addCustomTag}
+            disabled={!customTag.trim()}
+            className="px-2 py-1 bg-violet-600 text-white text-[10px] font-medium rounded-lg disabled:opacity-40"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -850,6 +1000,14 @@ function PromoDetail({ item, onBack, onUpdate }: {
         </div>
       )}
 
+      {/* Notes & Tags */}
+      <NotesAndTags
+        notes={item.notes}
+        tags={item.tags ?? []}
+        onSaveNotes={async (notes) => { await db.trackedPromos.update(item.id!, { notes }); onUpdate() }}
+        onSaveTags={async (tags) => { await db.trackedPromos.update(item.id!, { tags }); onUpdate() }}
+      />
+
       {/* Actions */}
       <div className="flex gap-2 pt-2">
         {(item.status === 'active' || item.status === 'ended') && (
@@ -1000,6 +1158,11 @@ function PromoTrackingList() {
                         {item.marginPercent.toFixed(1)}% margin
                       </span>
                     </div>
+                    {item.tags && item.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-0.5 mt-0.5">
+                        {item.tags.map(tag => <TagBadge key={tag} tag={tag} />)}
+                      </div>
+                    )}
                   </div>
                   {!reordering && <PromoStatusBadge status={item._effectiveStatus} endDate={item.endDate} />}
                 </button>
@@ -1440,6 +1603,14 @@ function PriceTrackingDetail({ item, onBack, onUpdate }: {
         </div>
       )}
 
+      {/* Notes & Tags */}
+      <NotesAndTags
+        notes={item.notes}
+        tags={item.tags ?? []}
+        onSaveNotes={async (notes) => { await db.trackedItems.update(item.id!, { notes }); onUpdate() }}
+        onSaveTags={async (tags) => { await db.trackedItems.update(item.id!, { tags }); onUpdate() }}
+      />
+
       {/* Actions */}
       <div className="flex gap-2 pt-2">
         {item.status === 'active' && (
@@ -1649,6 +1820,11 @@ function PriceTrackingList() {
                       </span>
                       <span className="text-[10px] text-gray-300">{fmtDate(item.changeDate)}</span>
                     </div>
+                    {item.tags && item.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-0.5 mt-0.5">
+                        {item.tags.map(tag => <TagBadge key={tag} tag={tag} />)}
+                      </div>
+                    )}
                   </div>
                   {!reordering && <PriceStatusBadge status={item.status} revertedAt={item.revertedAt} />}
                 </button>

@@ -17,6 +17,7 @@ export interface TrackedItem {
   newPrice: number
   changeDate: string       // ISO date "2026-04-01"
   notes: string
+  tags?: string[]            // user-defined tags: "Best Seller", "Slow Mover", etc.
   status: 'active' | 'reverted' | 'completed'
   currentPrice: number | null
   revertedAt: string | null
@@ -42,6 +43,7 @@ export interface TrackedPromo {
   endDate: string            // ISO date
   daysLeft: number
   notes: string
+  tags?: string[]            // user-defined tags: "Best Seller", "Slow Mover", etc.
   source?: 'system' | 'manual'   // system = from POS API (host/system promo), manual = user-entered
   status: 'active' | 'ended' | 'completed'
   sortOrder?: number
