@@ -1219,10 +1219,202 @@ function PromoTrackingList() {
 // USER CHANGES MODE — live feed of user price changes
 // ════════════════════════════════════════════════════════════════════════════
 
+interface UserChange {
+  itemCode: string
+  barcode: string | null
+  description: string
+  department: string
+  oldPrice: number
+  newPrice: number
+  changeDate: string
+  changedBy: string
+}
+
+function UserChangeDetail({ item, onBack }: { item: UserChange; onBack: () => void }) {
+  const [salesData, setSalesData] = useState<ItemSalesData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [chartMode, setChartMode] = useState<ChartMode>('weekly')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    getItemSales(item.itemCode, 90)
+      .then(data => { if (!cancelled) setSalesData(data) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [item.itemCode])
+
+  const { beforeSales, afterSales, chartData, changeDateLabel } = computeSalesImpact(
+    salesData?.dailySales ?? [], item.changeDate, chartMode
+  )
+
+  const priceDiff = item.newPrice - item.oldPrice
+  const pctChange = item.oldPrice > 0 ? (priceDiff / item.oldPrice) * 100 : 0
+
+  // Monthly aggregation for longer-term view
+  const monthlyData = useMemo(() => {
+    if (!salesData?.dailySales?.length) return []
+    const months = new Map<string, { qty: number; revenue: number; gp: number; days: number }>()
+    for (const s of salesData.dailySales) {
+      const monthKey = s.date.slice(0, 7) // "2026-03"
+      const m = months.get(monthKey) ?? { qty: 0, revenue: 0, gp: 0, days: 0 }
+      m.qty += s.qty
+      m.revenue += s.revenue
+      m.gp += s.gp
+      m.days++
+      months.set(monthKey, m)
+    }
+    return [...months.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, m]) => {
+        const [y, mo] = key.split('-')
+        return {
+          label: `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo) - 1]} ${y.slice(2)}`,
+          date: key,
+          qty: m.qty,
+          revenue: m.revenue,
+          gp: m.gp,
+          avgDailyQty: m.qty / m.days,
+        }
+      })
+  }, [salesData])
+
+  return (
+    <div className="p-4 space-y-4 overflow-auto">
+      <button onClick={onBack} className="text-sm text-violet-600 flex items-center gap-1">
+        <ArrowLeft size={14} /> Back
+      </button>
+
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={48} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900 truncate">{item.description}</p>
+          <p className="text-xs text-gray-400">{item.department} &middot; {item.itemCode}</p>
+        </div>
+      </div>
+
+      {/* Price Change Summary */}
+      <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase">Price Change</h3>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div>
+            <p className="text-[10px] text-gray-400">Before</p>
+            <p className="text-sm font-semibold text-gray-500 line-through">{fmtPrice(item.oldPrice)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-400">After</p>
+            <p className={`text-sm font-semibold ${priceDiff > 0 ? 'text-red-500' : 'text-green-600'}`}>{fmtPrice(item.newPrice)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-400">Change</p>
+            <p className={`text-sm font-semibold ${priceDiff > 0 ? 'text-red-400' : 'text-green-500'}`}>
+              {priceDiff > 0 ? '+' : ''}{pctChange.toFixed(1)}%
+            </p>
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-400 text-center">
+          Changed on {fmtDateFull(item.changeDate)} by <span className="text-blue-500">{item.changedBy}</span>
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><RefreshCw size={16} className="text-violet-400 animate-spin" /></div>
+      ) : salesData ? (
+        <>
+          {/* Weekly/Daily Sales Chart */}
+          {chartData.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase">Sales ({chartMode === 'weekly' ? 'Weekly' : 'Daily'})</h3>
+                <ChartModeToggle mode={chartMode} onChange={setChartMode} />
+              </div>
+              <div className="h-48 -mx-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9ca3af' }} interval="preserveStartEnd" tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v: number) => [v.toFixed(1), chartMode === 'weekly' ? 'Wk Qty' : 'Qty']} labelFormatter={(l: string) => chartMode === 'weekly' ? `Wk of ${l}` : l} />
+                    <ReferenceLine x={changeDateLabel} stroke="#7c3aed" strokeDasharray="4 4" label={{ value: 'Change', fontSize: 9, fill: '#7c3aed' }} />
+                    <Bar dataKey="qty" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Monthly Summary */}
+          {monthlyData.length > 1 && (
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase">Monthly Summary</h3>
+              <div className="space-y-1">
+                {monthlyData.map(m => (
+                  <div key={m.date} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50">
+                    <span className="text-gray-600 font-medium w-16">{m.label}</span>
+                    <span className="text-gray-400">{m.qty.toFixed(1)} qty</span>
+                    <span className="text-gray-400">{fmtPrice(m.revenue)} rev</span>
+                    <span className={m.gp >= 0 ? 'text-green-600' : 'text-red-500'}>{fmtPrice(m.gp)} GP</span>
+                    <span className="text-gray-300 text-[10px]">{m.avgDailyQty.toFixed(1)}/day</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Before vs After comparison */}
+          {(beforeSales.length > 0 || afterSales.length > 0) && (
+            <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase">Before vs After Price Change</h3>
+              <ComparisonRow label="Avg Daily Qty" before={avg(beforeSales.map(s => s.qty))} after={avg(afterSales.map(s => s.qty))} format={(n) => n.toFixed(1)} />
+              <ComparisonRow label="Avg Daily Revenue" before={avg(beforeSales.map(s => s.revenue))} after={avg(afterSales.map(s => s.revenue))} format={fmtPrice} />
+              <ComparisonRow label="Avg Daily GP" before={avg(beforeSales.map(s => s.gp))} after={avg(afterSales.map(s => s.gp))} format={fmtPrice} />
+              {beforeSales.length > 0 && afterSales.length > 0 && avg(beforeSales.map(s => s.revenue)) > 0 && avg(afterSales.map(s => s.revenue)) > 0 && (
+                <ComparisonRow
+                  label="GP Margin"
+                  before={(avg(beforeSales.map(s => s.gp)) / avg(beforeSales.map(s => s.revenue))) * 100}
+                  after={(avg(afterSales.map(s => s.gp)) / avg(afterSales.map(s => s.revenue))) * 100}
+                  format={(n) => n.toFixed(1) + '%'}
+                  invertColor
+                />
+              )}
+            </div>
+          )}
+
+          {/* Avg stats */}
+          {salesData.summary.avgDailyQty > 0 && (
+            <div className="bg-violet-50 rounded-xl p-3 space-y-1">
+              <h3 className="text-xs font-semibold text-violet-700">Overall ({salesData.summary.daysWithSales} days with sales)</h3>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-[10px] text-violet-500">Avg Daily Qty</p>
+                  <p className="text-sm font-semibold text-violet-700">{salesData.summary.avgDailyQty.toFixed(1)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-violet-500">Avg Daily Rev</p>
+                  <p className="text-sm font-semibold text-violet-700">${salesData.summary.avgDailyRevenue.toFixed(0)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-violet-500">Total Qty</p>
+                  <p className="text-sm font-semibold text-violet-700">{salesData.summary.totalQty}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-gray-400 text-center py-6">No sales data available</p>
+      )}
+    </div>
+  )
+}
+
 function UserChangesList() {
-  const [changes, setChanges] = useState<{ itemCode: string; barcode: string | null; description: string; department: string; oldPrice: number; newPrice: number; changeDate: string; changedBy: string }[]>([])
+  const [changes, setChanges] = useState<UserChange[]>([])
   const [loading, setLoading] = useState(true)
   const [listSearch, setListSearch] = useState('')
+  const [selected, setSelected] = useState<UserChange | null>(null)
 
   const fetchChanges = useCallback(async () => {
     setLoading(true)
@@ -1238,6 +1430,10 @@ function UserChangesList() {
   }, [])
 
   useEffect(() => { fetchChanges() }, [])
+
+  if (selected) {
+    return <UserChangeDetail item={selected} onBack={() => setSelected(null)} />
+  }
 
   // Filter by search
   let displayed = changes
@@ -1309,7 +1505,7 @@ function UserChangesList() {
               const priceDiff = item.newPrice - item.oldPrice
               const pctChange = item.oldPrice > 0 ? (priceDiff / item.oldPrice) * 100 : 0
               return (
-                <div key={`${item.itemCode}-${item.changeDate}`} className="flex items-center gap-3 p-3">
+                <button key={`${item.itemCode}-${item.changeDate}`} onClick={() => setSelected(item)} className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50">
                   <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
@@ -1327,7 +1523,7 @@ function UserChangesList() {
                       <span className="text-[10px] text-gray-300">{item.department}</span>
                     </div>
                   </div>
-                </div>
+                </button>
               )
             })}
           </div>
