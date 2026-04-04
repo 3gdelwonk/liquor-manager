@@ -1,14 +1,13 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, useRef, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { Lightbulb, Package, BarChart2, Tag, Settings, Activity, Crosshair } from 'lucide-react'
+import { Lightbulb, Package, BarChart2, Settings, Activity, Crosshair } from 'lucide-react'
 import { clearAllData } from './lib/db'
 import { getStockLevels, LIQUOR_DEPT_NAMES } from './lib/jarvis'
 import { prefetchImages, isImageSearchConfigured, clearImageCache, type PrefetchProgress } from './lib/images'
 import InsightsView from './components/InsightsView'
 import ProductsView from './components/ProductsView'
 import PerformanceView from './components/PerformanceView'
-import PromotionsView from './components/PromotionsView'
 import LiveSalesView from './components/LiveSalesView'
 import TrackingView from './components/TrackingView'
 
@@ -228,14 +227,13 @@ function SettingsSheet({ onClose }: { onClose: () => void }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'live' | 'insights' | 'products' | 'performance' | 'promos' | 'tracking'
+type Tab = 'live' | 'insights' | 'products' | 'performance' | 'tracking'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'live',        label: 'Live',      icon: <Activity size={16} /> },
   { id: 'insights',    label: 'Insights',  icon: <Lightbulb size={16} /> },
   { id: 'products',    label: 'Products',  icon: <Package size={16} /> },
   { id: 'performance', label: 'Perform',   icon: <BarChart2 size={16} /> },
-  { id: 'promos',      label: 'Promos',    icon: <Tag size={16} /> },
   { id: 'tracking',    label: 'Track',     icon: <Crosshair size={16} /> },
 ]
 
@@ -244,7 +242,6 @@ const TAB_TITLES: Record<Tab, string> = {
   insights:    'Insights',
   products:    'Products',
   performance: 'Performance',
-  promos:      'Promotions',
   tracking:    'Price Tracking',
 }
 
@@ -269,7 +266,6 @@ export default function App() {
       case 'insights':    return <InsightsView />
       case 'products':    return <ProductsView />
       case 'performance': return <PerformanceView />
-      case 'promos':      return <PromotionsView />
       case 'tracking':    return <TrackingView />
     }
   }

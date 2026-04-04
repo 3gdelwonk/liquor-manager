@@ -29,6 +29,44 @@ async function jarvisFetch<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function jarvisPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${getBaseUrl()}${path}`, {
+    method: 'POST',
+    headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`JARVISmart ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function jarvisPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${getBaseUrl()}${path}`, {
+    method: 'PUT',
+    headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`JARVISmart ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function jarvisDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`${getBaseUrl()}${path}`, {
+    method: 'DELETE',
+    headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`JARVISmart ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 // ── Raw API shapes (actual JARVISmart response) ─────────────────────────────
 
 interface RawPromoItem {
@@ -465,4 +503,143 @@ export async function getPromotions(): Promise<{ items: LivePromotion[]; count: 
   }
 
   return { items: allItems, count: allItems.length, expiringSoonCount };
+}
+
+// ── Cloud Status ─────────────────────────────────────────────────────────────
+
+export interface CloudStatus {
+  loggedIn: boolean;
+  tokenAge?: string;
+  lastRenewal?: string;
+  workingHours?: boolean;
+  message?: string;
+  [key: string]: unknown;
+}
+
+export async function getCloudStatus(): Promise<CloudStatus> {
+  try {
+    return await jarvisFetch<CloudStatus>('/api/pos-actions/status');
+  } catch {
+    return { loggedIn: false, message: 'Cannot reach POS cloud' };
+  }
+}
+
+// ── Order & POS Status ───────────────────────────────────────────────────────
+
+export interface OrderInfo {
+  itemCode: string;
+  supplier?: string;
+  orderCode?: string;
+  costPrice?: number;
+  cartonQty?: number;
+  cartonCost?: number;
+  [key: string]: unknown;
+}
+
+export interface PosStatus {
+  barcode: string;
+  needsFullSend?: boolean;
+  activePromo?: boolean;
+  lastSent?: string;
+  [key: string]: unknown;
+}
+
+export async function getOrderInfo(itemCode: string): Promise<OrderInfo> {
+  return jarvisFetch<OrderInfo>(`/api/pos/order-info/${encodeURIComponent(itemCode)}`);
+}
+
+export async function getPosStatus(barcode: string): Promise<PosStatus> {
+  return jarvisFetch<PosStatus>(`/api/pos/pos-status/${encodeURIComponent(barcode)}`);
+}
+
+// ── Stock Locations ──────────────────────────────────────────────────────────
+
+export interface StockLocation {
+  id: number;
+  aisle: string;
+  bay: string;
+  description?: string;
+  active: boolean;
+  [key: string]: unknown;
+}
+
+export interface ItemLocation {
+  locationId: number;
+  aisle: string;
+  bay: string;
+  description?: string;
+  [key: string]: unknown;
+}
+
+export async function getLocations(): Promise<StockLocation[]> {
+  const raw = await jarvisFetch<StockLocation[] | { locations: StockLocation[] }>('/api/pos/locations');
+  return Array.isArray(raw) ? raw : raw.locations;
+}
+
+export async function getItemLocations(itemCode: string): Promise<ItemLocation[]> {
+  const raw = await jarvisFetch<ItemLocation[] | { locations: ItemLocation[] }>(
+    `/api/pos/locations/item/${encodeURIComponent(itemCode)}`
+  );
+  return Array.isArray(raw) ? raw : raw.locations;
+}
+
+// ── Department List ──────────────────────────────────────────────────────────
+
+export interface Department {
+  code: number;
+  name: string;
+  [key: string]: unknown;
+}
+
+export async function getDepartmentList(): Promise<Department[]> {
+  const raw = await jarvisFetch<Department[] | { departments: Department[] }>('/api/pos/department-list');
+  return Array.isArray(raw) ? raw : raw.departments;
+}
+
+// ── SerpApi Intelligence ─────────────────────────────────────────────────────
+
+export interface ShoppingResult {
+  title: string;
+  price?: string;
+  source?: string;
+  link?: string;
+  thumbnail?: string;
+  [key: string]: unknown;
+}
+
+export interface ResearchResult {
+  knowledgeGraph?: Record<string, unknown>;
+  peopleAlsoAsk?: { question: string; snippet?: string }[];
+  [key: string]: unknown;
+}
+
+export async function getShoppingComparison(query: string): Promise<ShoppingResult[]> {
+  const params = new URLSearchParams({ q: query });
+  const raw = await jarvisFetch<ShoppingResult[] | { results: ShoppingResult[] }>(
+    `/api/pos/serpapi/shopping?${params}`
+  );
+  return Array.isArray(raw) ? raw : raw.results;
+}
+
+export async function getProductResearch(query: string): Promise<ResearchResult> {
+  const params = new URLSearchParams({ q: query });
+  return jarvisFetch<ResearchResult>(`/api/pos/serpapi/research?${params}`);
+}
+
+// ── Online Prices ────────────────────────────────────────────────────────────
+
+export interface OnlinePrice {
+  title: string;
+  price?: string;
+  source?: string;
+  link?: string;
+  [key: string]: unknown;
+}
+
+export async function getOnlinePrices(query: string): Promise<OnlinePrice[]> {
+  const params = new URLSearchParams({ q: query });
+  const raw = await jarvisFetch<OnlinePrice[] | { results: OnlinePrice[] }>(
+    `/api/pos/online-prices?${params}`
+  );
+  return Array.isArray(raw) ? raw : raw.results;
 }
