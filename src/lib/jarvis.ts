@@ -512,13 +512,23 @@ export interface CloudStatus {
   tokenAge?: string;
   lastRenewal?: string;
   workingHours?: boolean;
+  loginInProgress?: boolean;
   message?: string;
   [key: string]: unknown;
 }
 
 export async function getCloudStatus(): Promise<CloudStatus> {
   try {
-    return await jarvisFetch<CloudStatus>('/api/pos-actions/status');
+    const raw = await jarvisFetch<Record<string, unknown>>('/api/pos-actions/status');
+    return {
+      loggedIn: !!(raw.hasToken ?? raw.loggedIn ?? raw.connected),
+      tokenAge: raw.tokenAge as string | undefined,
+      lastRenewal: raw.lastRenewal as string | undefined,
+      workingHours: raw.workingHours as boolean | undefined,
+      loginInProgress: raw.loginInProgress as boolean | undefined,
+      message: raw.message as string | undefined,
+      ...raw,
+    };
   } catch {
     return { loggedIn: false, message: 'Cannot reach POS cloud' };
   }
