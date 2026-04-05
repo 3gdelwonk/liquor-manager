@@ -254,6 +254,14 @@ export default function App() {
   })
   const [showSettings, setShowSettings] = useState(false)
 
+  // Lock portrait orientation via Screen Orientation API
+  useState(() => {
+    const lock = screen?.orientation?.lock
+    if (lock) {
+      screen.orientation.lock('portrait-primary').catch(() => {})
+    }
+  })
+
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
     localStorage.setItem(LAST_TAB_KEY, tab)

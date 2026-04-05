@@ -20,3 +20,71 @@
 input, textarea, select {
   font-size: 16px !important;
 }
+
+/* Lock portrait — show blocker in landscape for browsers that ignore manifest */
+@media (orientation: landscape) and (max-height: 500px) {
+  body::after {
+    content: 'Please rotate your device to portrait mode';
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1e1b4b;
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    text-align: center;
+    padding: 2rem;
+  }
+}
+
+/* Barcode scanner overlay */
+.scanner-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.scanner-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 260px;
+  height: 180px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(124, 58, 237, 0.6);
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+}
+
+.scanner-corner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: #7c3aed;
+  border-style: solid;
+  border-width: 0;
+}
+.scanner-corner.tl { top: -2px; left: -2px; border-top-width: 3px; border-left-width: 3px; border-top-left-radius: 12px; }
+.scanner-corner.tr { top: -2px; right: -2px; border-top-width: 3px; border-right-width: 3px; border-top-right-radius: 12px; }
+.scanner-corner.bl { bottom: -2px; left: -2px; border-bottom-width: 3px; border-left-width: 3px; border-bottom-left-radius: 12px; }
+.scanner-corner.br { bottom: -2px; right: -2px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 12px; }
+
+.scanner-laser {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #7c3aed, #a78bfa, #7c3aed, transparent);
+  border-radius: 1px;
+  animation: scan-line 2s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.6);
+}
+
+@keyframes scan-line {
+  0%, 100% { top: 15%; }
+  50% { top: 85%; }
+}
