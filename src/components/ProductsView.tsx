@@ -155,6 +155,13 @@ export default function ProductsView() {
     )
   }, [])
 
+  // Toggle price lock on a product
+  const toggleItemLock = useCallback((itemCode: string, locked: boolean) => {
+    setItems(prev => prev.map(i =>
+      i.itemCode === itemCode ? { ...i, priceLocked: locked } : i
+    ))
+  }, [])
+
   // Apply filters + sort
   const displayed = useMemo(() => {
     let list = items
@@ -370,6 +377,7 @@ export default function ProductsView() {
             isTracked={trackedItemCodes.has(item.itemCode)}
             onAction={(action) => handleCardAction(item, action)}
             onRefresh={() => refreshItem(item.itemCode)}
+            onToggleLock={(locked) => toggleItemLock(item.itemCode, locked)}
           />
         ))}
       </div>

@@ -18,6 +18,21 @@ function getApiKey(): string {
 export const LIQUOR_DEPT_CODES = new Set([20, 21, 22, 23, 25]);
 export const LIQUOR_DEPT_NAMES = new Set(['LIQUEURS', 'WINE', 'SPIRITS', 'LIQUOR/MISC', 'BEER']);
 
+// ── Price Lock local persistence (until server returns it on stock) ─────────
+const PRICE_LOCK_KEY = 'liquor-manager-price-locks';
+function getPriceLocks(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(PRICE_LOCK_KEY) ?? '[]')) }
+  catch { return new Set() }
+}
+export function setPriceLockLocal(barcode: string, locked: boolean) {
+  const locks = getPriceLocks()
+  if (locked) locks.add(barcode); else locks.delete(barcode)
+  localStorage.setItem(PRICE_LOCK_KEY, JSON.stringify([...locks]))
+}
+export function isPriceLockedLocal(barcode: string): boolean {
+  return getPriceLocks().has(barcode)
+}
+
 async function jarvisFetch<T>(path: string): Promise<T> {
   const res = await fetch(`${getBaseUrl()}${path}`, {
     headers: {
@@ -139,6 +154,7 @@ interface RawStockItem {
   AvgWeekQty: number;
   barcode: string | null;
   OrderCode: string | null;
+  PriceLocked?: boolean;
 }
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -198,6 +214,7 @@ export interface StockItem {
   avgDayQty: number;
   avgWeekQty: number;
   orderCode: string | null;
+  priceLocked: boolean;
 }
 
 export interface LivePromotion {
@@ -325,6 +342,7 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
     avgDayQty:      s.AvgDayQty,
     avgWeekQty:     s.AvgWeekQty,
     orderCode:      s.OrderCode ?? null,
+    priceLocked:    s.PriceLocked ?? isPriceLockedLocal(s.barcode ?? ''),
   }));
 }
 
@@ -349,6 +367,7 @@ export async function searchItems(query: string, limit = 20): Promise<SearchResu
       avgDayQty:      s.AvgDayQty,
       avgWeekQty:     s.AvgWeekQty,
       orderCode:      s.OrderCode ?? null,
+      priceLocked:    s.PriceLocked ?? isPriceLockedLocal(s.barcode ?? ''),
     })),
     total: raw.count,
   };

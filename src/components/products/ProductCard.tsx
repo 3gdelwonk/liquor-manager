@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin, Compass,
-  Printer, Send, Loader2, Calendar, RefreshCw,
+  Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
   Box, Truck, BarChart3
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus } from '../../lib/jarvis'
-import { getOrderInfo, getPosStatus } from '../../lib/jarvis'
-import { adjustStock, sendItemToPos, printLabel } from '../../lib/jarvisActions'
+import { getOrderInfo, getPosStatus, setPriceLockLocal } from '../../lib/jarvis'
+import { adjustStock, sendItemToPos, printLabel, togglePriceLock } from '../../lib/jarvisActions'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 
@@ -73,14 +73,16 @@ interface ProductCardProps {
   isTracked: boolean
   onAction: (action: 'price' | 'promo' | 'location' | 'scout' | 'createItem') => void
   onRefresh?: () => Promise<void>
+  onToggleLock?: (locked: boolean) => void
 }
 
-export default function ProductCard({ item, promo, isTracked, onAction, onRefresh }: ProductCardProps) {
+export default function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock }: ProductCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
   const [posStatus, setPosStatus] = useState<PosStatus | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [lockBusy, setLockBusy] = useState(false)
 
   // Stock adjustment inline
   const [stockAdj, setStockAdj] = useState('')
@@ -155,6 +157,23 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
     }
   }
 
+  async function handleToggleLock() {
+    if (!item.barcode) return
+    const newLocked = !item.priceLocked
+    setLockBusy(true)
+    setActionMsg(null)
+    try {
+      await togglePriceLock(item.barcode, newLocked)
+    } catch {
+      // Server may not support it yet — continue with local-only
+    }
+    // Always persist locally for immediate UI feedback
+    setPriceLockLocal(item.barcode, newLocked)
+    onToggleLock?.(newLocked)
+    setActionMsg(newLocked ? 'Price locked' : 'Price unlocked')
+    setLockBusy(false)
+  }
+
   return (
     <div className="border border-gray-100 rounded-xl overflow-hidden">
       {/* Collapsed summary — always visible */}
@@ -174,6 +193,7 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
               {item.department}
             </span>
             {promo && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-700">PROMO</span>}
+            {item.priceLocked && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-red-100 text-red-700 flex items-center gap-0.5"><Lock size={8} />LOCKED</span>}
             {isTracked && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-cyan-100 text-cyan-700">TRACKING</span>}
           </div>
 
@@ -277,6 +297,13 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
             <ActionBtn icon={<Send size={14} />} label="Send to POS" onClick={handleSendToPos} busy={sendBusy} />
             <ActionBtn icon={<Printer size={14} />} label="Print Label" onClick={handlePrintLabel} busy={printBusy} />
             <ActionBtn
+              icon={item.priceLocked ? <Unlock size={14} /> : <Lock size={14} />}
+              label={item.priceLocked ? 'Unlock Price' : 'Lock Price'}
+              onClick={handleToggleLock}
+              busy={lockBusy}
+              highlight={item.priceLocked}
+            />
+            <ActionBtn
               icon={<RefreshCw size={14} />}
               label="Refresh"
               busy={refreshing}
@@ -338,12 +365,16 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
   )
 }
 
-function ActionBtn({ icon, label, onClick, busy }: { icon: React.ReactNode; label: string; onClick: () => void; busy?: boolean }) {
+function ActionBtn({ icon, label, onClick, busy, highlight }: { icon: React.ReactNode; label: string; onClick: () => void; busy?: boolean; highlight?: boolean }) {
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onClick() }}
       disabled={busy}
-      className="flex flex-col items-center gap-1 py-2 px-1 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-violet-600 transition-colors disabled:opacity-50"
+      className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg transition-colors disabled:opacity-50 ${
+        highlight
+          ? 'bg-red-50 text-red-600 hover:bg-red-100'
+          : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-violet-600'
+      }`}
     >
       {busy ? <Loader2 size={14} className="animate-spin" /> : icon}
       <span className="text-[10px] font-medium">{label}</span>

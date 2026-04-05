@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { DollarSign, Loader2, CheckCircle, Send } from 'lucide-react'
+import { DollarSign, Loader2, CheckCircle, Send, Lock } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
-import { changePriceAndSend, changePriceOnly } from '../../lib/jarvisActions'
+import { setPriceLockLocal } from '../../lib/jarvis'
+import { changePriceAndSend, changePriceOnly, togglePriceLock } from '../../lib/jarvisActions'
 
 interface PriceChangeSheetProps {
   item: StockItem
@@ -16,6 +17,7 @@ function fmtMoney(n: number) {
 export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChangeSheetProps) {
   const [newPrice, setNewPrice] = useState(item.sellPrice.toFixed(2))
   const [sendToPos, setSendToPos] = useState(true)
+  const [lockPrice, setLockPrice] = useState(item.priceLocked)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -37,6 +39,11 @@ export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChan
         ? await changePriceAndSend(item.barcode, price)
         : await changePriceOnly(item.barcode, price)
       if (res.success) {
+        // Lock/unlock price if toggle changed
+        if (lockPrice !== item.priceLocked && item.barcode) {
+          togglePriceLock(item.barcode, lockPrice).catch(() => {})
+          setPriceLockLocal(item.barcode, lockPrice)
+        }
         setSuccess(true)
         onSuccess(price)
         setTimeout(onClose, 1200)
@@ -99,23 +106,41 @@ export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChan
           </div>
         </div>
 
-        {/* Send to POS toggle */}
-        <label className="flex items-center gap-3 cursor-pointer">
-          <div className="relative">
-            <input
-              type="checkbox"
-              checked={sendToPos}
-              onChange={e => setSendToPos(e.target.checked)}
-              className="sr-only"
-            />
-            <div className={`w-10 h-5 rounded-full transition-colors ${sendToPos ? 'bg-violet-600' : 'bg-gray-300'}`} />
-            <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${sendToPos ? 'translate-x-5' : ''}`} />
-          </div>
-          <div className="flex items-center gap-1.5 text-sm text-gray-700">
-            <Send size={14} />
-            Send to POS terminal
-          </div>
-        </label>
+        {/* Toggles */}
+        <div className="space-y-2">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <div className="relative">
+              <input
+                type="checkbox"
+                checked={sendToPos}
+                onChange={e => setSendToPos(e.target.checked)}
+                className="sr-only"
+              />
+              <div className={`w-10 h-5 rounded-full transition-colors ${sendToPos ? 'bg-violet-600' : 'bg-gray-300'}`} />
+              <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${sendToPos ? 'translate-x-5' : ''}`} />
+            </div>
+            <div className="flex items-center gap-1.5 text-sm text-gray-700">
+              <Send size={14} />
+              Send to POS terminal
+            </div>
+          </label>
+          <label className="flex items-center gap-3 cursor-pointer">
+            <div className="relative">
+              <input
+                type="checkbox"
+                checked={lockPrice}
+                onChange={e => setLockPrice(e.target.checked)}
+                className="sr-only"
+              />
+              <div className={`w-10 h-5 rounded-full transition-colors ${lockPrice ? 'bg-red-500' : 'bg-gray-300'}`} />
+              <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${lockPrice ? 'translate-x-5' : ''}`} />
+            </div>
+            <div className="flex items-center gap-1.5 text-sm text-gray-700">
+              <Lock size={14} />
+              Lock price (block host pickup)
+            </div>
+          </label>
+        </div>
 
         {/* Apply button */}
         <button

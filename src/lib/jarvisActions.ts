@@ -83,6 +83,15 @@ export async function printLabel(
   return jarvisPost('/api/pos-actions/print-label', { barcode })
 }
 
+// ── Price Lock ──────────────────────────────────────────────────────────────
+
+export async function togglePriceLock(
+  barcode: string,
+  locked: boolean
+): Promise<{ success: boolean; locked?: boolean; message?: string }> {
+  return jarvisPut(`/api/pos/price-lock/${encodeURIComponent(barcode)}`, { locked })
+}
+
 // ── Stock Location Actions ───────────────────────────────────────────────────
 
 export async function assignItemLocation(
