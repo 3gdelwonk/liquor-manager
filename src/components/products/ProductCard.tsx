@@ -84,11 +84,8 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
   const [refreshing, setRefreshing] = useState(false)
   const [lockBusy, setLockBusy] = useState(false)
 
-  // Stock adjustment inline
-  const [stockAdj, setStockAdj] = useState('')
-  const [stockReason, setStockReason] = useState('')
-  const [adjBusy, setAdjBusy] = useState(false)
-  const [adjResult, setAdjResult] = useState<string | null>(null)
+  // Stock adjustment sheet
+  const [showAdjustSheet, setShowAdjustSheet] = useState(false)
 
   // Direct action states
   const [sendBusy, setSendBusy] = useState(false)
@@ -110,23 +107,6 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
       if (ps.status === 'fulfilled' && ps.value) setPosStatus(ps.value as PosStatus)
     }).finally(() => setDetailLoading(false))
   }, [expanded, item.itemCode, item.barcode, orderInfo, posStatus])
-
-  async function handleAdjustStock() {
-    const qty = Number(stockAdj)
-    if (!qty || !item.barcode) return
-    setAdjBusy(true)
-    setAdjResult(null)
-    try {
-      const res = await adjustStock(item.barcode, qty, stockReason || undefined)
-      setAdjResult(res.success ? `QOH adjusted${res.newQoh !== undefined ? ` → ${res.newQoh}` : ''}` : (res.message ?? 'Failed'))
-      setStockAdj('')
-      setStockReason('')
-    } catch (err) {
-      setAdjResult((err as Error).message)
-    } finally {
-      setAdjBusy(false)
-    }
-  }
 
   async function handleSendToPos() {
     if (!item.barcode) return
@@ -200,9 +180,6 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
           </div>
 
           <QohGauge qoh={item.onHand} min={item.reorderLevel} />
-
-          {/* Barcode stripe */}
-          {item.barcode && <BarcodeStripe value={item.barcode} height={28} />}
         </div>
         <div className="text-gray-400 shrink-0 mt-1">
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -221,12 +198,14 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
             <>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="grid grid-cols-3 gap-3">
-                  <MetricCell
-                    label="QOH"
-                    value={String(item.onHand)}
-                    color={item.onHand <= 0 ? 'text-red-600' : item.onHand < item.reorderLevel ? 'text-amber-600' : 'text-green-600'}
-                    sub={item.isOnReorder ? <span className="flex items-center gap-0.5 text-[9px] text-blue-600 font-medium mt-0.5"><Box size={8} /> On order ({item.onOrder})</span> : undefined}
-                  />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowAdjustSheet(true) }}
+                    className="text-center rounded-lg py-1 -my-1 hover:bg-gray-200/60 transition-colors ring-1 ring-transparent hover:ring-gray-300"
+                  >
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">QOH</p>
+                    <p className={`text-sm font-semibold ${item.onHand <= 0 ? 'text-red-600' : item.onHand < item.reorderLevel ? 'text-amber-600' : 'text-green-600'}`}>{item.onHand}</p>
+                    {item.isOnReorder && <span className="flex items-center justify-center gap-0.5 text-[9px] text-blue-600 font-medium mt-0.5"><Box size={8} /> On order ({item.onOrder})</span>}
+                  </button>
                   <MetricCell label="Cost" value={item.avgCost > 0 ? `$${fmtMoney(item.avgCost)}` : '—'} />
                   {(() => {
                     const m = item.sellPrice > 0 && item.avgCost > 0 ? ((item.sellPrice - item.avgCost) / item.sellPrice * 100) : null
@@ -334,46 +313,20 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
               <Printer size={14} />
               <span className="text-[11px] font-semibold">Print</span>
             </button>
+
+            {/* Send to POS (blue) */}
+            <button
+              onClick={(e) => { e.stopPropagation(); handleSendToPos() }}
+              disabled={sendBusy || !item.barcode}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              <span className="text-[11px] font-semibold">POS</span>
+            </button>
           </div>
 
-          {/* Stock adjust + Send to POS bar */}
-          <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-2">
-            <div className="flex gap-2 items-center">
-              <input
-                type="number"
-                placeholder="+/- qty"
-                value={stockAdj}
-                onChange={e => setStockAdj(e.target.value)}
-                className="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-              />
-              <input
-                type="text"
-                placeholder="Reason"
-                value={stockReason}
-                onChange={e => setStockReason(e.target.value)}
-                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-              />
-              <button
-                onClick={handleAdjustStock}
-                disabled={adjBusy || !stockAdj || !item.barcode}
-                className="px-3 py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
-              >
-                {adjBusy ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
-              </button>
-              <button
-                onClick={handleSendToPos}
-                disabled={sendBusy || !item.barcode}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
-              >
-                {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <><Send size={12} /> POS</>}
-              </button>
-            </div>
-            {adjResult && (
-              <p className={`text-xs font-medium ${adjResult.includes('Failed') || adjResult.includes('JARVISmart') ? 'text-red-600' : 'text-green-600'}`}>
-                {adjResult}
-              </p>
-            )}
-          </div>
+          {/* Barcode stripe */}
+          {item.barcode && <BarcodeStripe value={item.barcode} height={28} />}
 
           {/* POS status + Refresh footer */}
           <div className="flex items-center justify-between px-1">
@@ -414,6 +367,19 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
           )}
         </div>
       )}
+
+      {/* Adjust Stock bottom sheet */}
+      {showAdjustSheet && (
+        <AdjustStockSheet
+          item={item}
+          onClose={() => setShowAdjustSheet(false)}
+          onSuccess={(msg) => {
+            setActionMsg(msg)
+            setShowAdjustSheet(false)
+            onRefresh?.()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -424,6 +390,136 @@ function MetricCell({ label, value, color, sub }: { label: string; value: string
       <p className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</p>
       <p className={`text-sm font-semibold ${color ?? 'text-gray-800'}`}>{value}</p>
       {sub}
+    </div>
+  )
+}
+
+const REASON_CODES = [
+  'Breakage',
+  'Theft/Shrinkage',
+  'Stocktake correction',
+  'Damaged goods',
+  'Staff use',
+  'Promo/Sample',
+  'Return to supplier',
+  'Received stock',
+  'Other',
+]
+
+function AdjustStockSheet({ item, onClose, onSuccess }: {
+  item: StockItem
+  onClose: () => void
+  onSuccess: (msg: string) => void
+}) {
+  const [newQty, setNewQty] = useState('')
+  const [reason, setReason] = useState('')
+  const [customReason, setCustomReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const qty = Number(newQty)
+  const diff = !isNaN(qty) && newQty !== '' ? qty - item.onHand : null
+
+  async function handleApply() {
+    if (diff === null || diff === 0 || !item.barcode) return
+    const reasonText = reason === 'Other' ? customReason : reason
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await adjustStock(item.barcode, diff, reasonText || undefined)
+      if (res.success) {
+        onSuccess(`QOH adjusted${res.newQoh !== undefined ? ` → ${res.newQoh}` : ''}`)
+      } else {
+        setError(res.message ?? 'Failed to adjust stock')
+      }
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative bg-white rounded-t-2xl p-5 space-y-4 pb-safe" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-gray-900">Adjust Stock</h2>
+          <button onClick={onClose} className="text-gray-400 text-lg leading-none">✕</button>
+        </div>
+
+        {/* Product info */}
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-sm font-medium text-gray-800 truncate">{item.description}</p>
+          <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
+            <span>Current QOH: <strong className="text-gray-900">{item.onHand}</strong></span>
+            <span className="font-mono text-gray-400">{item.barcode}</span>
+          </div>
+        </div>
+
+        {/* New quantity input */}
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-gray-700">New Physical Quantity</label>
+          <input
+            type="number"
+            step="1"
+            min="0"
+            value={newQty}
+            onChange={e => setNewQty(e.target.value)}
+            placeholder="Enter actual count"
+            autoFocus
+            className="w-full px-3 py-2.5 text-lg font-semibold border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+          />
+          {diff !== null && diff !== 0 && (
+            <p className={`text-xs font-medium ${diff > 0 ? 'text-green-600' : 'text-red-600'}`}>
+              Adjustment: {diff > 0 ? '+' : ''}{diff} unit{Math.abs(diff) !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+
+        {/* Reason code */}
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-gray-700">Reason</label>
+          <div className="flex flex-wrap gap-1.5">
+            {REASON_CODES.map(r => (
+              <button
+                key={r}
+                onClick={() => setReason(reason === r ? '' : r)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${
+                  reason === r
+                    ? 'bg-violet-100 border-violet-300 text-violet-700'
+                    : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          {reason === 'Other' && (
+            <input
+              type="text"
+              value={customReason}
+              onChange={e => setCustomReason(e.target.value)}
+              placeholder="Describe reason..."
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300 mt-1"
+            />
+          )}
+        </div>
+
+        {/* Apply button */}
+        <button
+          onClick={handleApply}
+          disabled={busy || diff === null || diff === 0 || !item.barcode}
+          className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {busy ? <Loader2 size={16} className="animate-spin" /> : null}
+          {busy ? 'Adjusting...' : diff !== null && diff !== 0
+            ? `Set QOH to ${qty} (${diff > 0 ? '+' : ''}${diff})`
+            : 'Enter new quantity'}
+        </button>
+
+        {error && <p className="text-xs text-red-600 font-medium text-center">{error}</p>}
+      </div>
     </div>
   )
 }
