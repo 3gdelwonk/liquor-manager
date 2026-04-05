@@ -1176,64 +1176,66 @@ function PromoTrackingList() {
         ) : (
           <div className="divide-y divide-gray-50">
             {filtered.map((item, idx) => (
-              <div key={item.id} className="flex items-center">
-                {reordering && (
-                  <div className="flex flex-col pl-2 shrink-0">
-                    <button
-                      onClick={() => handleMove(idx, -1)}
-                      disabled={idx === 0}
-                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
-                    >
-                      <ChevronUp size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleMove(idx, 1)}
-                      disabled={idx === filtered.length - 1}
-                      className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
-                    >
-                      <ChevronDown size={16} />
-                    </button>
-                  </div>
-                )}
-                <button
-                  onClick={() => !reordering && setSelectedPromo(item)}
-                  className={`flex-1 flex items-center gap-3 p-3 text-left ${reordering ? '' : 'hover:bg-gray-50'}`}
-                >
-                  <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
-                      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
-                        item.source === 'manual' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'
-                      }`}>
-                        {item.source === 'manual' ? 'Manual' : 'System'}
-                      </span>
+              <div key={item.id}>
+                <div className="flex items-center">
+                  {reordering && (
+                    <div className="flex flex-col pl-2 shrink-0">
+                      <button
+                        onClick={() => handleMove(idx, -1)}
+                        disabled={idx === 0}
+                        className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
+                      >
+                        <ChevronUp size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleMove(idx, 1)}
+                        disabled={idx === filtered.length - 1}
+                        className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-20"
+                      >
+                        <ChevronDown size={16} />
+                      </button>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
-                      {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
-                      {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
-                      <span className="text-gray-300">{item.itemCode}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      <span className="text-xs text-gray-400">
-                        {fmtPrice(item.normalPrice)} → <span className="text-green-600 font-medium">{fmtPrice(item.promoPrice)}</span>
-                      </span>
-                      <span className="text-[10px] text-green-600 font-medium">{item.discountPercent.toFixed(0)}% off</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-gray-400">{fmtDate(item.startDate)} → {fmtDate(item.endDate)}</span>
-                      <span className={`text-[10px] font-medium ${item.marginPercent >= 20 ? 'text-green-600' : item.marginPercent >= 10 ? 'text-amber-600' : 'text-red-600'}`}>
-                        {item.marginPercent.toFixed(1)}% margin
-                      </span>
-                    </div>
-                    {item.tags && item.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-0.5 mt-0.5">
-                        {item.tags.map(tag => <TagBadge key={tag} tag={tag} />)}
+                  )}
+                  <button
+                    onClick={() => !reordering && setSelectedPromo(item)}
+                    className={`flex-1 flex items-center gap-3 p-3 text-left ${reordering ? '' : 'hover:bg-gray-50'}`}
+                  >
+                    <ProductImage itemCode={item.itemCode} description={item.description} department={item.department} barcode={item.barcode} size={40} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium text-gray-900 truncate">{item.description}</p>
+                        <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
+                          item.source === 'manual' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'
+                        }`}>
+                          {item.source === 'manual' ? 'Manual' : 'System'}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                  {!reordering && <PromoStatusBadge status={item._effectiveStatus} endDate={item.endDate} />}
-                </button>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-gray-400 font-mono">
+                        {(() => { const oc = getOrderCode(item.barcode); return oc ? <span>#{oc}</span> : null })()}
+                        {item.barcode && <span className="text-gray-300">{item.barcode}</span>}
+                        <span className="text-gray-300">{item.itemCode}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="text-xs text-gray-400">
+                          {fmtPrice(item.normalPrice)} → <span className="text-green-600 font-medium">{fmtPrice(item.promoPrice)}</span>
+                        </span>
+                        <span className="text-[10px] text-green-600 font-medium">{item.discountPercent.toFixed(0)}% off</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-gray-400">{fmtDate(item.startDate)} → {fmtDate(item.endDate)}</span>
+                        <span className={`text-[10px] font-medium ${item.marginPercent >= 20 ? 'text-green-600' : item.marginPercent >= 10 ? 'text-amber-600' : 'text-red-600'}`}>
+                          {item.marginPercent.toFixed(1)}% margin
+                        </span>
+                      </div>
+                      {item.tags && item.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-0.5 mt-0.5">
+                          {item.tags.map(tag => <TagBadge key={tag} tag={tag} />)}
+                        </div>
+                      )}
+                    </div>
+                    {!reordering && <PromoStatusBadge status={item._effectiveStatus} endDate={item.endDate} />}
+                  </button>
+                </div>
                 {item.barcode && <div className="px-3 pb-2"><BarcodeStripe value={item.barcode} height={30} /></div>}
               </div>
             ))}
