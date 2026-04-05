@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Printer, Loader2, CheckCircle, Hash } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
-import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
+import { getPrinters, getLabelStyles, type Printer as PrinterType, type LabelStyle } from '../../lib/jarvis'
 import { printLabel } from '../../lib/jarvisActions'
 
 interface PrintLabelSheetProps {
@@ -9,49 +9,63 @@ interface PrintLabelSheetProps {
   onClose: () => void
 }
 
-const LABEL_FORMATS = [
-  { key: 'shelf', label: 'Shelf Label' },
-  { key: 'barcode', label: 'Barcode Only' },
-  { key: 'promo', label: 'Promo Tag' },
-  { key: 'bin', label: 'Bin Label' },
-]
-
 function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export default function PrintLabelSheet({ item, onClose }: PrintLabelSheetProps) {
   const [printers, setPrinters] = useState<PrinterType[]>([])
-  const [loadingPrinters, setLoadingPrinters] = useState(true)
+  const [styles, setStyles] = useState<LabelStyle[]>([])
+  const [loading, setLoading] = useState(true)
   const [selectedPrinter, setSelectedPrinter] = useState<number | null>(null)
-  const [format, setFormat] = useState('shelf')
+  const [selectedStyle, setSelectedStyle] = useState<number | null>(null)
   const [qty, setQty] = useState(1)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
 
   useEffect(() => {
-    getPrinters()
-      .then(list => {
-        setPrinters(list.filter(p => p.isLabel))
-        // Default to first label printer
-        const first = list.find(p => p.isLabel)
-        if (first) setSelectedPrinter(first.id)
+    Promise.all([getPrinters(), getLabelStyles()])
+      .then(([printerList, styleList]) => {
+        const labelPrinters = printerList.filter(p => p.isLabel)
+        setPrinters(labelPrinters)
+        setStyles(styleList)
+        // Default to first label printer + its default style
+        const first = labelPrinters[0]
+        if (first) {
+          setSelectedPrinter(first.id)
+          setSelectedStyle(first.defaultStyleId ?? styleList.find(s => s.printerId === first.id)?.id ?? null)
+        }
       })
       .catch(() => setError('Cannot load printers'))
-      .finally(() => setLoadingPrinters(false))
+      .finally(() => setLoading(false))
   }, [])
 
+  // Filter styles to those matching the selected printer
+  const availableStyles = useMemo(() =>
+    styles.filter(s => s.printerId === selectedPrinter),
+    [styles, selectedPrinter]
+  )
+
+  // When printer changes, auto-select its default style
+  function handlePrinterChange(printerId: number) {
+    setSelectedPrinter(printerId)
+    const printer = printers.find(p => p.id === printerId)
+    const defaultStyle = printer?.defaultStyleId
+    const printerStyles = styles.filter(s => s.printerId === printerId)
+    setSelectedStyle(defaultStyle ?? printerStyles[0]?.id ?? null)
+  }
+
   async function handlePrint() {
-    if (!item.barcode) return
+    if (!item.barcode || !selectedPrinter) return
     setBusy(true)
     setError(null)
     setResult(null)
     try {
       const res = await printLabel(item.barcode, {
-        printerId: selectedPrinter ?? undefined,
+        printerId: selectedPrinter,
         qty,
-        format,
+        styleId: selectedStyle ?? undefined,
       })
       if (res.success || res.ok) {
         setResult(res.message ?? `${res.labelCount ?? qty} label(s) queued`)
@@ -83,83 +97,89 @@ export default function PrintLabelSheet({ item, onClose }: PrintLabelSheetProps)
           </div>
         </div>
 
-        {/* Printer selection */}
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Printer</label>
-          {loadingPrinters ? (
-            <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
-              <Loader2 size={14} className="animate-spin" /> Loading printers...
+        {loading ? (
+          <div className="flex items-center gap-2 text-xs text-gray-400 py-4 justify-center">
+            <Loader2 size={14} className="animate-spin" /> Loading printers...
+          </div>
+        ) : (
+          <>
+            {/* Printer selection */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-500 uppercase">Printer</label>
+              {printers.length === 0 ? (
+                <p className="text-xs text-gray-400">No label printers found</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {printers.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => handlePrinterChange(p.id)}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                        selectedPrinter === p.id
+                          ? 'border-violet-500 bg-violet-50 text-violet-700'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      <Printer size={14} />
+                      <span className="truncate max-w-[140px]">{p.name}</span>
+                      {p.queueRunning && <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          ) : printers.length === 0 ? (
-            <p className="text-xs text-gray-400">No label printers found</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {printers.map(p => (
+
+            {/* Label style selection */}
+            {availableStyles.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-gray-500 uppercase">Label Style</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {availableStyles.map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => setSelectedStyle(s.id)}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                        selectedStyle === s.id
+                          ? 'border-violet-500 bg-violet-50 text-violet-700'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Quantity */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-500 uppercase">Quantity</label>
+              <div className="flex items-center gap-3">
                 <button
-                  key={p.id}
-                  onClick={() => setSelectedPrinter(p.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                    selectedPrinter === p.id
-                      ? 'border-violet-500 bg-violet-50 text-violet-700'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
+                  onClick={() => setQty(q => Math.max(1, q - 1))}
+                  className="w-9 h-9 rounded-lg border border-gray-200 text-gray-600 font-bold text-lg flex items-center justify-center hover:bg-gray-50"
                 >
-                  <Printer size={14} />
-                  <span className="truncate max-w-[140px]">{p.name}</span>
-                  {p.queueRunning && <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />}
+                  -
                 </button>
-              ))}
+                <div className="flex items-center gap-1.5">
+                  <Hash size={14} className="text-gray-400" />
+                  <span className="text-lg font-semibold text-gray-800 w-8 text-center">{qty}</span>
+                </div>
+                <button
+                  onClick={() => setQty(q => Math.min(50, q + 1))}
+                  className="w-9 h-9 rounded-lg border border-gray-200 text-gray-600 font-bold text-lg flex items-center justify-center hover:bg-gray-50"
+                >
+                  +
+                </button>
+              </div>
             </div>
-          )}
-        </div>
-
-        {/* Format selection */}
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Label Format</label>
-          <div className="grid grid-cols-2 gap-2">
-            {LABEL_FORMATS.map(f => (
-              <button
-                key={f.key}
-                onClick={() => setFormat(f.key)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  format === f.key
-                    ? 'border-violet-500 bg-violet-50 text-violet-700'
-                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Quantity */}
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Quantity</label>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setQty(q => Math.max(1, q - 1))}
-              className="w-9 h-9 rounded-lg border border-gray-200 text-gray-600 font-bold text-lg flex items-center justify-center hover:bg-gray-50"
-            >
-              -
-            </button>
-            <div className="flex items-center gap-1.5">
-              <Hash size={14} className="text-gray-400" />
-              <span className="text-lg font-semibold text-gray-800 w-8 text-center">{qty}</span>
-            </div>
-            <button
-              onClick={() => setQty(q => Math.min(50, q + 1))}
-              className="w-9 h-9 rounded-lg border border-gray-200 text-gray-600 font-bold text-lg flex items-center justify-center hover:bg-gray-50"
-            >
-              +
-            </button>
-          </div>
-        </div>
+          </>
+        )}
 
         {/* Print button */}
         <button
           onClick={handlePrint}
-          disabled={busy || !item.barcode || !selectedPrinter}
+          disabled={busy || !item.barcode || !selectedPrinter || loading}
           className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : result ? <CheckCircle size={16} /> : <Printer size={16} />}

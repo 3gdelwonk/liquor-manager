@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Search, X, Loader2, CheckCircle, AlertCircle, Printer, Hash } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
-import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
+import { getPrinters, getLabelStyles, type Printer as PrinterType, type LabelStyle } from '../../lib/jarvis'
 import { printLabel } from '../../lib/jarvisActions'
 
 interface BulkPrintSheetProps {
@@ -16,37 +16,49 @@ interface PrintEntry {
   message?: string
 }
 
-const LABEL_FORMATS = [
-  { key: 'shelf', label: 'Shelf Label' },
-  { key: 'barcode', label: 'Barcode Only' },
-  { key: 'promo', label: 'Promo Tag' },
-  { key: 'bin', label: 'Bin Label' },
-]
-
 function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) {
   const [printers, setPrinters] = useState<PrinterType[]>([])
-  const [loadingPrinters, setLoadingPrinters] = useState(true)
+  const [styles, setStyles] = useState<LabelStyle[]>([])
+  const [loading, setLoading] = useState(true)
   const [selectedPrinter, setSelectedPrinter] = useState<number | null>(null)
-  const [format, setFormat] = useState('shelf')
+  const [selectedStyle, setSelectedStyle] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [entries, setEntries] = useState<PrintEntry[]>([])
   const [processing, setProcessing] = useState(false)
   const [done, setDone] = useState(false)
 
   useEffect(() => {
-    getPrinters()
-      .then(list => {
-        setPrinters(list.filter(p => p.isLabel))
-        const first = list.find(p => p.isLabel)
-        if (first) setSelectedPrinter(first.id)
+    Promise.all([getPrinters(), getLabelStyles()])
+      .then(([printerList, styleList]) => {
+        const labelPrinters = printerList.filter(p => p.isLabel)
+        setPrinters(labelPrinters)
+        setStyles(styleList)
+        const first = labelPrinters[0]
+        if (first) {
+          setSelectedPrinter(first.id)
+          setSelectedStyle(first.defaultStyleId ?? styleList.find(s => s.printerId === first.id)?.id ?? null)
+        }
       })
       .catch(() => {})
-      .finally(() => setLoadingPrinters(false))
+      .finally(() => setLoading(false))
   }, [])
+
+  // Styles for the selected printer
+  const availableStyles = useMemo(() =>
+    styles.filter(s => s.printerId === selectedPrinter),
+    [styles, selectedPrinter]
+  )
+
+  function handlePrinterChange(printerId: number) {
+    setSelectedPrinter(printerId)
+    const printer = printers.find(p => p.id === printerId)
+    const printerStyles = styles.filter(s => s.printerId === printerId)
+    setSelectedStyle(printer?.defaultStyleId ?? printerStyles[0]?.id ?? null)
+  }
 
   const addedCodes = useMemo(() => new Set(entries.map(e => e.item.itemCode)), [entries])
 
@@ -96,7 +108,7 @@ export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) 
         const res = await printLabel(entry.item.barcode, {
           printerId: selectedPrinter,
           qty: entry.qty,
-          format,
+          styleId: selectedStyle ?? undefined,
         })
         setEntries(prev => prev.map((e, j) => j === i
           ? { ...e, status: (res.success || res.ok) ? 'done' : 'error', message: (res.success || res.ok) ? undefined : (res.message ?? 'Failed') }
@@ -128,57 +140,61 @@ export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) 
           <button onClick={onClose} className="text-gray-400 text-lg leading-none">✕</button>
         </div>
 
-        {/* Printer + Format selection */}
+        {/* Printer + Style selection */}
         <div className="px-4 pt-3 space-y-3 shrink-0 border-b border-gray-100 pb-3">
-          {/* Printer */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase">Printer</label>
-            {loadingPrinters ? (
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Loader2 size={12} className="animate-spin" /> Loading...
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {printers.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedPrinter(p.id)}
-                    disabled={processing}
-                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                      selectedPrinter === p.id
-                        ? 'border-violet-500 bg-violet-50 text-violet-700'
-                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                    }`}
-                  >
-                    <Printer size={12} />
-                    <span className="truncate max-w-[120px]">{p.name}</span>
-                    {p.queueRunning && <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Format */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase">Format</label>
-            <div className="flex flex-wrap gap-1.5">
-              {LABEL_FORMATS.map(f => (
-                <button
-                  key={f.key}
-                  onClick={() => setFormat(f.key)}
-                  disabled={processing}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                    format === f.key
-                      ? 'border-violet-500 bg-violet-50 text-violet-700'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
+          {loading ? (
+            <div className="flex items-center gap-2 text-xs text-gray-400 py-2 justify-center">
+              <Loader2 size={12} className="animate-spin" /> Loading printers...
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Printer */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500 uppercase">Printer</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {printers.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => handlePrinterChange(p.id)}
+                      disabled={processing}
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                        selectedPrinter === p.id
+                          ? 'border-violet-500 bg-violet-50 text-violet-700'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      <Printer size={12} />
+                      <span className="truncate max-w-[120px]">{p.name}</span>
+                      {p.queueRunning && <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Label Style */}
+              {availableStyles.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase">Label Style</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableStyles.map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => setSelectedStyle(s.id)}
+                        disabled={processing}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          selectedStyle === s.id
+                            ? 'border-violet-500 bg-violet-50 text-violet-700'
+                            : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                        }`}
+                      >
+                        {s.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Search to add items */}
@@ -292,7 +308,7 @@ export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) 
           ) : (
             <button
               onClick={handlePrintAll}
-              disabled={processing || entries.length === 0 || !selectedPrinter}
+              disabled={processing || entries.length === 0 || !selectedPrinter || loading}
               className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {processing ? (

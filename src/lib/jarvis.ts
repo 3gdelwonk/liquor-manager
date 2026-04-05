@@ -698,6 +698,23 @@ export interface Printer {
   isReport: boolean;
   queueId: string;
   queueRunning: boolean;
+  defaultStyleId?: number;
+}
+
+export interface Stationery {
+  id: number;
+  name: string;
+  labelsPerPage: number;
+  paperSize: string;
+  [key: string]: unknown;
+}
+
+export interface LabelStyle {
+  id: number;
+  name: string;
+  printerId: number;
+  stationeryId?: number;
+  [key: string]: unknown;
 }
 
 export interface LabelQueueItem {
@@ -715,6 +732,14 @@ export interface LabelQueueItem {
 
 export async function getPrinters(): Promise<Printer[]> {
   return jarvisFetch<Printer[]>('/api/pos/printers');
+}
+
+export async function getStationery(): Promise<Stationery[]> {
+  return jarvisFetch<Stationery[]>('/api/pos/stationery');
+}
+
+export async function getLabelStyles(): Promise<LabelStyle[]> {
+  return jarvisFetch<LabelStyle[]>('/api/pos/label-styles');
 }
 
 export async function getLabelQueue(): Promise<{ pending: number; items: LabelQueueItem[] }> {
