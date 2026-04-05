@@ -138,6 +138,7 @@ interface RawStockItem {
   AvgDayQty: number;
   AvgWeekQty: number;
   barcode: string | null;
+  OrderCode: string | null;
 }
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -196,6 +197,7 @@ export interface StockItem {
   isOnReorder: boolean;
   avgDayQty: number;
   avgWeekQty: number;
+  orderCode: string | null;
 }
 
 export interface LivePromotion {
@@ -322,12 +324,34 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
     isOnReorder:    s.IsOnReorder,
     avgDayQty:      s.AvgDayQty,
     avgWeekQty:     s.AvgWeekQty,
+    orderCode:      s.OrderCode ?? null,
   }));
 }
 
 export async function searchItems(query: string, limit = 20): Promise<SearchResult> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  return jarvisFetch<SearchResult>(`/api/pos/search?${params}`);
+  const raw = await jarvisFetch<{ items: RawStockItem[]; count: number }>(
+    `/api/pos/search?${params}`
+  );
+  return {
+    items: raw.items.map(s => ({
+      itemCode:       s.ItemCode,
+      barcode:        s.barcode ?? null,
+      description:    s.ItemDescription.trim(),
+      department:     s.DepartmentName,
+      departmentCode: s.DepartmentCode,
+      onHand:         s.QOH,
+      reorderLevel:   s.MinOH,
+      sellPrice:      s.RegSellPrice,
+      avgCost:        s.AvgCost,
+      onOrder:        s.OnOrder,
+      isOnReorder:    s.IsOnReorder,
+      avgDayQty:      s.AvgDayQty,
+      avgWeekQty:     s.AvgWeekQty,
+      orderCode:      s.OrderCode ?? null,
+    })),
+    total: raw.count,
+  };
 }
 
 export async function getPriceLookup(itemCode: string): Promise<unknown> {

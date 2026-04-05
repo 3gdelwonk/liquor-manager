@@ -139,7 +139,8 @@ export default function ProductsView() {
       list = list.filter(i =>
         i.description.toLowerCase().includes(q) ||
         i.itemCode.toLowerCase().includes(q) ||
-        (i.barcode && i.barcode.includes(q))
+        (i.barcode && i.barcode.includes(q)) ||
+        (i.orderCode && i.orderCode.includes(q))
       )
     }
 

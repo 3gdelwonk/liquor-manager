@@ -177,8 +177,8 @@ export default function ProductCard({ item, promo, isTracked, onAction }: Produc
 
           {/* Order code / Item code */}
           <div className="text-[10px] text-gray-400 font-mono">
-            {orderInfo?.orderCodeRaw
-              ? <><span className="text-gray-500">#{orderInfo.orderCodeRaw}</span> <span className="text-gray-300">{item.itemCode}</span></>
+            {(item.orderCode || orderInfo?.orderCodeRaw)
+              ? <><span className="text-gray-500">#{item.orderCode ?? orderInfo?.orderCodeRaw}</span> <span className="text-gray-300">{item.itemCode}</span></>
               : item.itemCode}
           </div>
 
