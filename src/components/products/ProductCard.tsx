@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
-  Box, Truck,
+  Box, Truck, Trash2, Plus,
 } from 'lucide-react'
-import type { StockItem, LivePromotion, OrderInfo, PosStatus } from '../../lib/jarvis'
-import { getOrderInfo, getPosStatus, setPriceLockLocal } from '../../lib/jarvis'
-import { adjustStock, sendItemToPos, togglePriceLock } from '../../lib/jarvisActions'
+import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation } from '../../lib/jarvis'
+import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations } from '../../lib/jarvis'
+import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation } from '../../lib/jarvisActions'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 
@@ -71,7 +71,7 @@ interface ProductCardProps {
   item: StockItem
   promo: LivePromotion | undefined
   isTracked: boolean
-  onAction: (action: 'price' | 'promo' | 'location' | 'createItem' | 'printLabel') => void
+  onAction: (action: 'price' | 'promo' | 'createItem' | 'printLabel') => void
   onRefresh?: () => Promise<void>
   onToggleLock?: (locked: boolean) => void
 }
@@ -86,6 +86,18 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
 
   // Stock adjustment sheet
   const [showAdjustSheet, setShowAdjustSheet] = useState(false)
+
+  // Location inline
+  const [showLocationPanel, setShowLocationPanel] = useState(false)
+  const [allLocations, setAllLocations] = useState<StockLocation[]>([])
+  const [itemLocations, setItemLocations] = useState<ItemLocation[]>([])
+  const [locLoading, setLocLoading] = useState(false)
+  const [locBusy, setLocBusy] = useState(false)
+  const [newAisle, setNewAisle] = useState('')
+  const [newBay, setNewBay] = useState('')
+  const [newLocDesc, setNewLocDesc] = useState('')
+  const [selectedLocId, setSelectedLocId] = useState<number | ''>('')
+  const [locMsg, setLocMsg] = useState<string | null>(null)
 
   // Direct action states
   const [sendBusy, setSendBusy] = useState(false)
@@ -107,6 +119,84 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
       if (ps.status === 'fulfilled' && ps.value) setPosStatus(ps.value as PosStatus)
     }).finally(() => setDetailLoading(false))
   }, [expanded, item.itemCode, item.barcode, orderInfo, posStatus])
+
+  // Load locations when panel opens
+  useEffect(() => {
+    if (!showLocationPanel) return
+    setLocLoading(true)
+    Promise.all([
+      getLocations(),
+      getItemLocations(item.itemCode),
+    ]).then(([all, curr]) => {
+      setAllLocations(all.filter(l => l.active))
+      setItemLocations(curr)
+    }).catch(() => setLocMsg('Failed to load locations'))
+      .finally(() => setLocLoading(false))
+  }, [showLocationPanel, item.itemCode])
+
+  async function handleAssignLocation() {
+    if (!selectedLocId) return
+    setLocBusy(true)
+    setLocMsg(null)
+    try {
+      const res = await assignItemLocation(Number(selectedLocId), item.itemCode)
+      if (res.success) {
+        setLocMsg('Assigned')
+        const updated = await getItemLocations(item.itemCode)
+        setItemLocations(updated)
+        setSelectedLocId('')
+      } else {
+        setLocMsg(res.message ?? 'Failed')
+      }
+    } catch (err) {
+      setLocMsg((err as Error).message)
+    } finally {
+      setLocBusy(false)
+    }
+  }
+
+  async function handleCreateAndAssign() {
+    if (!newAisle.trim() || !newBay.trim()) return
+    setLocBusy(true)
+    setLocMsg(null)
+    try {
+      const res = await createLocation(newAisle.trim(), newBay.trim(), newLocDesc.trim() || undefined)
+      if (res.success && res.id) {
+        await assignItemLocation(res.id, item.itemCode)
+        setLocMsg('Location created & assigned')
+        const [all, curr] = await Promise.all([getLocations(), getItemLocations(item.itemCode)])
+        setAllLocations(all.filter(l => l.active))
+        setItemLocations(curr)
+        setNewAisle('')
+        setNewBay('')
+        setNewLocDesc('')
+      } else {
+        setLocMsg(res.message ?? 'Failed to create location')
+      }
+    } catch (err) {
+      setLocMsg((err as Error).message)
+    } finally {
+      setLocBusy(false)
+    }
+  }
+
+  async function handleRemoveLocation(loc: ItemLocation) {
+    setLocBusy(true)
+    setLocMsg(null)
+    try {
+      const res = await removeItemLocation(loc.locationId, item.itemCode)
+      if (res.success) {
+        setItemLocations(prev => prev.filter(l => l.locationId !== loc.locationId))
+        setLocMsg('Removed')
+      } else {
+        setLocMsg(res.message ?? 'Failed')
+      }
+    } catch (err) {
+      setLocMsg((err as Error).message)
+    } finally {
+      setLocBusy(false)
+    }
+  }
 
   async function handleSendToPos() {
     if (!item.barcode) return
@@ -189,6 +279,13 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
       {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-gray-100 p-3 space-y-3">
+          {/* Barcode stripe — centred under description */}
+          {item.barcode && (
+            <div className="flex justify-center">
+              <BarcodeStripe value={item.barcode} height={32} />
+            </div>
+          )}
+
           {/* Metrics grid */}
           {detailLoading ? (
             <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
@@ -263,13 +360,13 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
             </div>
           )}
 
-          {/* Grouped action buttons */}
-          <div className="flex gap-2">
+          {/* Action buttons — row 1: Price, Promo, Location, Print */}
+          <div className="grid grid-cols-4 gap-2">
             {/* Price group (green) — Change Price + Lock toggle */}
-            <div className="flex rounded-lg overflow-hidden flex-1">
+            <div className="flex rounded-lg overflow-hidden">
               <button
                 onClick={(e) => { e.stopPropagation(); onAction('price') }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+                className="flex-1 flex items-center justify-center gap-1 py-2.5 bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
               >
                 <DollarSign size={14} />
                 <span className="text-[11px] font-semibold">Price</span>
@@ -277,7 +374,7 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
               <button
                 onClick={(e) => { e.stopPropagation(); handleToggleLock() }}
                 disabled={lockBusy}
-                className={`px-2.5 py-2 transition-colors disabled:opacity-50 ${
+                className={`px-2 py-2.5 transition-colors disabled:opacity-50 ${
                   item.priceLocked
                     ? 'bg-red-100 text-red-600 hover:bg-red-200'
                     : 'bg-green-50 text-green-600 hover:bg-green-100'
@@ -290,16 +387,18 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
             {/* Promo (amber) */}
             <button
               onClick={(e) => { e.stopPropagation(); onAction('promo') }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+              className="flex items-center justify-center gap-1 py-2.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
             >
               <Tag size={14} />
               <span className="text-[11px] font-semibold">Promo</span>
             </button>
 
-            {/* Location (blue) */}
+            {/* Location (blue) — toggles inline panel */}
             <button
-              onClick={(e) => { e.stopPropagation(); onAction('location') }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+              onClick={(e) => { e.stopPropagation(); setShowLocationPanel(p => !p) }}
+              className={`flex items-center justify-center gap-1 py-2.5 rounded-lg transition-colors ${
+                showLocationPanel ? 'bg-blue-200 text-blue-800' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }`}
             >
               <MapPin size={14} />
               <span className="text-[11px] font-semibold">Location</span>
@@ -308,25 +407,129 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
             {/* Print (gray) */}
             <button
               onClick={(e) => { e.stopPropagation(); onAction('printLabel') }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+              className="flex items-center justify-center gap-1 py-2.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
               <Printer size={14} />
               <span className="text-[11px] font-semibold">Print</span>
             </button>
-
-            {/* Send to POS (blue) */}
-            <button
-              onClick={(e) => { e.stopPropagation(); handleSendToPos() }}
-              disabled={sendBusy || !item.barcode}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
-            >
-              {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              <span className="text-[11px] font-semibold">POS</span>
-            </button>
           </div>
 
-          {/* Barcode stripe */}
-          {item.barcode && <BarcodeStripe value={item.barcode} height={28} />}
+          {/* Location inline panel */}
+          {showLocationPanel && (
+            <div className="bg-blue-50 rounded-lg p-3 space-y-2.5">
+              {locLoading ? (
+                <div className="flex items-center gap-2 text-xs text-blue-600">
+                  <Loader2 size={12} className="animate-spin" /> Loading locations...
+                </div>
+              ) : (
+                <>
+                  {/* Current locations */}
+                  {itemLocations.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-semibold text-blue-500 uppercase">Current</p>
+                      {itemLocations.map(loc => (
+                        <div key={loc.locationId} className="flex items-center justify-between bg-white rounded-lg px-2.5 py-1.5">
+                          <span className="text-xs font-medium text-gray-700">
+                            Aisle {loc.aisle}, Bay {loc.bay}
+                            {loc.description && <span className="text-gray-400"> — {loc.description}</span>}
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRemoveLocation(loc) }}
+                            disabled={locBusy}
+                            className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Assign existing location */}
+                  {allLocations.filter(l => !itemLocations.some(il => il.locationId === l.id)).length > 0 && (
+                    <div className="flex gap-1.5 items-center">
+                      <select
+                        value={selectedLocId}
+                        onChange={e => setSelectedLocId(e.target.value ? Number(e.target.value) : '')}
+                        onClick={e => e.stopPropagation()}
+                        className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                      >
+                        <option value="">Assign existing...</option>
+                        {allLocations
+                          .filter(l => !itemLocations.some(il => il.locationId === l.id))
+                          .map(l => (
+                            <option key={l.id} value={l.id}>
+                              Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleAssignLocation() }}
+                        disabled={locBusy || !selectedLocId}
+                        className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+                      >
+                        {locBusy ? <Loader2 size={12} className="animate-spin" /> : 'Assign'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Create new location */}
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-semibold text-blue-500 uppercase flex items-center gap-1"><Plus size={10} /> New Location</p>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={newAisle}
+                        onChange={e => setNewAisle(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        placeholder="Aisle"
+                        className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                      />
+                      <input
+                        type="text"
+                        value={newBay}
+                        onChange={e => setNewBay(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        placeholder="Bay"
+                        className="w-16 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                      />
+                      <input
+                        type="text"
+                        value={newLocDesc}
+                        onChange={e => setNewLocDesc(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        placeholder="Description (optional)"
+                        className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                      />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCreateAndAssign() }}
+                        disabled={locBusy || !newAisle.trim() || !newBay.trim()}
+                        className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+                      >
+                        {locBusy ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {locMsg && (
+                    <p className={`text-[11px] font-medium ${locMsg.includes('Failed') || locMsg.includes('fail') ? 'text-red-600' : 'text-green-600'}`}>
+                      {locMsg}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Send to POS — full width */}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleSendToPos() }}
+            disabled={sendBusy || !item.barcode}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+          >
+            {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            <span className="text-xs font-semibold">Send to POS</span>
+          </button>
 
           {/* POS status + Refresh footer */}
           <div className="flex items-center justify-between px-1">
