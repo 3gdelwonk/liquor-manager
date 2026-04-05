@@ -175,8 +175,12 @@ export default function ProductCard({ item, promo, isTracked, onAction }: Produc
             {isTracked && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-cyan-100 text-cyan-700">TRACKING</span>}
           </div>
 
-          {/* Item code */}
-          <div className="text-[10px] text-gray-400 font-mono">{item.itemCode}</div>
+          {/* Order code / Item code */}
+          <div className="text-[10px] text-gray-400 font-mono">
+            {orderInfo?.orderCodeRaw
+              ? <><span className="text-gray-500">#{orderInfo.orderCodeRaw}</span> <span className="text-gray-300">{item.itemCode}</span></>
+              : item.itemCode}
+          </div>
 
           {/* Price + QOH row */}
           <div className="flex items-center gap-3">
@@ -213,11 +217,11 @@ export default function ProductCard({ item, promo, isTracked, onAction }: Produc
                   {orderInfo.supplier && (
                     <div className="flex items-center gap-1"><Truck size={10} className="text-gray-400" /> {orderInfo.supplier}</div>
                   )}
-                  {orderInfo.orderCode && (
-                    <div><span className="text-gray-400">Order:</span> <span className="font-mono font-medium">{orderInfo.orderCode}</span></div>
+                  {orderInfo.orderCodeRaw && (
+                    <div><span className="text-gray-400">Order:</span> <span className="font-mono font-medium">{orderInfo.orderCodeRaw}</span></div>
                   )}
-                  {orderInfo.cartonQty && (
-                    <div><span className="text-gray-400">Ctn:</span> {orderInfo.cartonQty} × ${fmtMoney(orderInfo.costPrice ?? 0)}</div>
+                  {orderInfo.cartonQty && orderInfo.cartonCost && (
+                    <div><span className="text-gray-400">Ctn:</span> {orderInfo.cartonQty} × ${fmtMoney(orderInfo.unitCost ?? 0)} (${fmtMoney(orderInfo.cartonCost)})</div>
                   )}
                 </div>
               )}

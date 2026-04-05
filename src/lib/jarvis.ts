@@ -536,14 +536,36 @@ export async function getCloudStatus(): Promise<CloudStatus> {
 
 // ── Order & POS Status ───────────────────────────────────────────────────────
 
+export interface SupplierInfo {
+  supplierName: string;
+  supplierId: number;
+  orderCode: string | null;
+  orderCodeRaw: string | null;
+  supplierRef: string | null;
+  ctnCost: number;
+  ctnQty: number;
+  unitCost: number;
+  minOrderQty: number;
+  isPrimary: boolean;
+  lastOrdered: string | null;
+  lastReceived: string | null;
+  lastReceivedCost: number | null;
+}
+
 export interface OrderInfo {
   itemCode: string;
+  description: string;
+  barcode: string | null;
+  sellPrice: number;
+  qoh: number;
+  suppliers: SupplierInfo[];
+  // Convenience: primary supplier fields (computed)
   supplier?: string;
-  orderCode?: string;
-  costPrice?: number;
+  orderCode?: string | null;
+  orderCodeRaw?: string | null;
+  unitCost?: number;
   cartonQty?: number;
   cartonCost?: number;
-  [key: string]: unknown;
 }
 
 export interface PosStatus {
@@ -555,7 +577,18 @@ export interface PosStatus {
 }
 
 export async function getOrderInfo(itemCode: string): Promise<OrderInfo> {
-  return jarvisFetch<OrderInfo>(`/api/pos/order-info/${encodeURIComponent(itemCode)}`);
+  const raw = await jarvisFetch<OrderInfo>(`/api/pos/order-info/${encodeURIComponent(itemCode)}`);
+  // Populate convenience fields from primary supplier
+  const primary = raw.suppliers?.find(s => s.isPrimary) ?? raw.suppliers?.[0];
+  if (primary) {
+    raw.supplier = primary.supplierName;
+    raw.orderCode = primary.orderCode;
+    raw.orderCodeRaw = primary.orderCodeRaw;
+    raw.unitCost = primary.unitCost;
+    raw.cartonQty = primary.ctnQty;
+    raw.cartonCost = primary.ctnCost;
+  }
+  return raw;
 }
 
 export async function getPosStatus(barcode: string): Promise<PosStatus> {
