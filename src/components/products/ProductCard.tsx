@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin, Compass,
-  Printer, Send, PackagePlus, AlertTriangle, Loader2, Calendar,
+  Printer, Send, Loader2, Calendar,
   Box, Truck, BarChart3
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus } from '../../lib/jarvis'
