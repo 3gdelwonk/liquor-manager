@@ -67,11 +67,17 @@ export default function SetTokenSheet({ onClose, onSuccess }: SetTokenSheetProps
               {status.tokenAge && (
                 <div className="flex items-center gap-1"><Clock size={10} /> Token age: {status.tokenAge}</div>
               )}
-              {status.lastRenewal && (
-                <div>Last renewal: {status.lastRenewal}</div>
+              {(status as Record<string, unknown>).renewsIn && (
+                <div>Renews in: {String((status as Record<string, unknown>).renewsIn)}</div>
+              )}
+              {(status as Record<string, unknown>).expiresIn && (
+                <div>Expires in: {String((status as Record<string, unknown>).expiresIn)}</div>
               )}
               {status.workingHours !== undefined && (
-                <div>Working hours: {status.workingHours ? 'Yes' : 'No'}</div>
+                <div>Working hours: {status.workingHours ? 'Yes' : 'No'}{(status as Record<string, unknown>).schedule ? ` (${(status as Record<string, unknown>).schedule})` : ''}</div>
+              )}
+              {(status as Record<string, unknown>).currentHour && (
+                <div>Current time: {String((status as Record<string, unknown>).currentHour)}</div>
               )}
             </div>
             {status.message && <p className="text-xs text-gray-400">{status.message}</p>}
