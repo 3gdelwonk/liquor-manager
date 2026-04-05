@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import {
-  ChevronDown, ChevronUp, DollarSign, Tag, MapPin, Compass,
+  ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
-  Box, Truck, BarChart3,
+  Box, Truck,
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal } from '../../lib/jarvis'
@@ -71,7 +71,7 @@ interface ProductCardProps {
   item: StockItem
   promo: LivePromotion | undefined
   isTracked: boolean
-  onAction: (action: 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'printLabel') => void
+  onAction: (action: 'price' | 'promo' | 'location' | 'createItem' | 'printLabel') => void
   onRefresh?: () => Promise<void>
   onToggleLock?: (locked: boolean) => void
 }
@@ -212,41 +212,52 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
       {/* Expanded detail */}
       {expanded && (
         <div className="border-t border-gray-100 p-3 space-y-3">
-          {/* Order info + POS status (lazy loaded) */}
+          {/* Metrics grid */}
           {detailLoading ? (
             <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
               <Loader2 size={14} className="animate-spin" /> Loading details...
             </div>
           ) : (
-            <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-1.5">
-              {orderInfo && (
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
-                  {orderInfo.supplier && (
-                    <div className="flex items-center gap-1"><Truck size={10} className="text-gray-400" /> {orderInfo.supplier}</div>
-                  )}
-                  {orderInfo.orderCodeRaw && (
-                    <div><span className="text-gray-400">Order:</span> <span className="font-mono font-medium">{orderInfo.orderCodeRaw}</span></div>
-                  )}
-                  {orderInfo.cartonQty && orderInfo.cartonCost && (
-                    <div><span className="text-gray-400">Ctn:</span> {orderInfo.cartonQty} × ${fmtMoney(orderInfo.unitCost ?? 0)} (${fmtMoney(orderInfo.cartonCost)})</div>
-                  )}
+            <>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <MetricCell
+                    label="QOH"
+                    value={String(item.onHand)}
+                    color={item.onHand <= 0 ? 'text-red-600' : item.onHand < item.reorderLevel ? 'text-amber-600' : 'text-green-600'}
+                    sub={item.isOnReorder ? <span className="flex items-center gap-0.5 text-[9px] text-blue-600 font-medium mt-0.5"><Box size={8} /> On order ({item.onOrder})</span> : undefined}
+                  />
+                  <MetricCell label="Cost" value={item.avgCost > 0 ? `$${fmtMoney(item.avgCost)}` : '—'} />
+                  {(() => {
+                    const m = item.sellPrice > 0 && item.avgCost > 0 ? ((item.sellPrice - item.avgCost) / item.sellPrice * 100) : null
+                    return (
+                      <MetricCell
+                        label="Margin"
+                        value={m !== null ? `${m.toFixed(1)}%` : '—'}
+                        color={m !== null ? marginColor(m) : undefined}
+                      />
+                    )
+                  })()}
+                  <MetricCell label="Avg/Day" value={item.avgDayQty.toFixed(1)} />
+                  <MetricCell label="Avg/Week" value={item.avgWeekQty.toFixed(1)} />
+                  <MetricCell label="Reorder" value={String(item.reorderLevel)} />
                 </div>
-              )}
-              {posStatus && (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className={`font-medium ${posStatus.needsFullSend ? 'text-amber-600' : 'text-green-600'}`}>
-                    POS: {posStatus.needsFullSend ? 'Needs send' : 'In sync'}
-                  </span>
-                  {posStatus.activePromo && <span className="text-violet-600">Active promo on POS</span>}
-                </div>
-              )}
-              {/* Velocity */}
-              <div className="flex items-center gap-3 text-xs text-gray-500">
-                <div className="flex items-center gap-1"><BarChart3 size={10} /> {item.avgDayQty.toFixed(1)}/day</div>
-                <div>{item.avgWeekQty.toFixed(1)}/week</div>
-                {item.isOnReorder && <div className="flex items-center gap-1"><Box size={10} className="text-blue-500" /> On order ({item.onOrder})</div>}
               </div>
-            </div>
+
+              {/* Supplier/order info — compact one-liner */}
+              {orderInfo && (orderInfo.supplier || orderInfo.orderCodeRaw || orderInfo.cartonQty) && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-500 px-1">
+                  <Truck size={10} className="text-gray-400 shrink-0" />
+                  <span className="truncate">
+                    {[
+                      orderInfo.supplier,
+                      orderInfo.orderCodeRaw && `#${orderInfo.orderCodeRaw}`,
+                      orderInfo.cartonQty && orderInfo.cartonCost && `Ctn ${orderInfo.cartonQty}×$${fmtMoney(orderInfo.unitCost ?? 0)}`,
+                    ].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+              )}
+            </>
           )}
 
           {/* Promo details (if on promotion) */}
@@ -273,26 +284,112 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
             </div>
           )}
 
-          {/* Action buttons */}
-          <div className="grid grid-cols-4 gap-2">
-            <ActionBtn icon={<DollarSign size={14} />} label="Change Price" onClick={() => onAction('price')} />
-            <ActionBtn icon={<Tag size={14} />} label="Create Promo" onClick={() => onAction('promo')} />
-            <ActionBtn icon={<MapPin size={14} />} label="Location" onClick={() => onAction('location')} />
-            <ActionBtn icon={<Compass size={14} />} label="Scout" onClick={() => onAction('scout')} />
-            <ActionBtn icon={<Send size={14} />} label="Send to POS" onClick={handleSendToPos} busy={sendBusy} />
-            <ActionBtn icon={<Printer size={14} />} label="Print Label" onClick={() => onAction('printLabel')} />
-            <ActionBtn
-              icon={item.priceLocked ? <Unlock size={14} /> : <Lock size={14} />}
-              label={item.priceLocked ? 'Unlock Price' : 'Lock Price'}
-              onClick={handleToggleLock}
-              busy={lockBusy}
-              highlight={item.priceLocked}
-            />
-            <ActionBtn
-              icon={<RefreshCw size={14} />}
-              label="Refresh"
-              busy={refreshing}
-              onClick={async () => {
+          {/* Grouped action buttons */}
+          <div className="flex gap-2">
+            {/* Price group (green) — Change Price + Lock toggle */}
+            <div className="flex rounded-lg overflow-hidden flex-1">
+              <button
+                onClick={(e) => { e.stopPropagation(); onAction('price') }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+              >
+                <DollarSign size={14} />
+                <span className="text-[11px] font-semibold">Price</span>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleToggleLock() }}
+                disabled={lockBusy}
+                className={`px-2.5 py-2 transition-colors disabled:opacity-50 ${
+                  item.priceLocked
+                    ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                    : 'bg-green-50 text-green-600 hover:bg-green-100'
+                } border-l border-green-200`}
+              >
+                {lockBusy ? <Loader2 size={12} className="animate-spin" /> : item.priceLocked ? <Lock size={12} /> : <Unlock size={12} />}
+              </button>
+            </div>
+
+            {/* Promo (amber) */}
+            <button
+              onClick={(e) => { e.stopPropagation(); onAction('promo') }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+            >
+              <Tag size={14} />
+              <span className="text-[11px] font-semibold">Promo</span>
+            </button>
+
+            {/* Location (blue) */}
+            <button
+              onClick={(e) => { e.stopPropagation(); onAction('location') }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              <MapPin size={14} />
+              <span className="text-[11px] font-semibold">Location</span>
+            </button>
+
+            {/* Print (gray) */}
+            <button
+              onClick={(e) => { e.stopPropagation(); onAction('printLabel') }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+            >
+              <Printer size={14} />
+              <span className="text-[11px] font-semibold">Print</span>
+            </button>
+          </div>
+
+          {/* Stock adjust + Send to POS bar */}
+          <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-2">
+            <div className="flex gap-2 items-center">
+              <input
+                type="number"
+                placeholder="+/- qty"
+                value={stockAdj}
+                onChange={e => setStockAdj(e.target.value)}
+                className="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+              <input
+                type="text"
+                placeholder="Reason"
+                value={stockReason}
+                onChange={e => setStockReason(e.target.value)}
+                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
+              <button
+                onClick={handleAdjustStock}
+                disabled={adjBusy || !stockAdj || !item.barcode}
+                className="px-3 py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+              >
+                {adjBusy ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
+              </button>
+              <button
+                onClick={handleSendToPos}
+                disabled={sendBusy || !item.barcode}
+                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+              >
+                {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <><Send size={12} /> POS</>}
+              </button>
+            </div>
+            {adjResult && (
+              <p className={`text-xs font-medium ${adjResult.includes('Failed') || adjResult.includes('JARVISmart') ? 'text-red-600' : 'text-green-600'}`}>
+                {adjResult}
+              </p>
+            )}
+          </div>
+
+          {/* POS status + Refresh footer */}
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2 text-xs">
+              {posStatus && (
+                <>
+                  <span className={`font-medium ${posStatus.needsFullSend ? 'text-amber-600' : 'text-green-600'}`}>
+                    POS: {posStatus.needsFullSend ? 'Needs send' : 'In sync'}
+                  </span>
+                  {posStatus.activePromo && <span className="text-violet-600">Active promo</span>}
+                </>
+              )}
+            </div>
+            <button
+              onClick={async (e) => {
+                e.stopPropagation()
                 if (!onRefresh) return
                 setRefreshing(true)
                 try {
@@ -303,7 +400,11 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
                   setRefreshing(false)
                 }
               }}
-            />
+              disabled={refreshing}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-violet-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
+            >
+              {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            </button>
           </div>
 
           {actionMsg && (
@@ -311,58 +412,18 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
               {actionMsg}
             </p>
           )}
-
-          {/* Inline stock adjustment */}
-          <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase">Adjust Stock</p>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                placeholder="+/- qty"
-                value={stockAdj}
-                onChange={e => setStockAdj(e.target.value)}
-                className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-              />
-              <input
-                type="text"
-                placeholder="Reason (optional)"
-                value={stockReason}
-                onChange={e => setStockReason(e.target.value)}
-                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-              />
-              <button
-                onClick={handleAdjustStock}
-                disabled={adjBusy || !stockAdj || !item.barcode}
-                className="px-3 py-1.5 bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-50"
-              >
-                {adjBusy ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
-              </button>
-            </div>
-            {adjResult && (
-              <p className={`text-xs font-medium ${adjResult.includes('Failed') || adjResult.includes('JARVISmart') ? 'text-red-600' : 'text-green-600'}`}>
-                {adjResult}
-              </p>
-            )}
-          </div>
         </div>
       )}
     </div>
   )
 }
 
-function ActionBtn({ icon, label, onClick, busy, highlight }: { icon: React.ReactNode; label: string; onClick: () => void; busy?: boolean; highlight?: boolean }) {
+function MetricCell({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: React.ReactNode }) {
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick() }}
-      disabled={busy}
-      className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg transition-colors disabled:opacity-50 ${
-        highlight
-          ? 'bg-red-50 text-red-600 hover:bg-red-100'
-          : 'bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-violet-600'
-      }`}
-    >
-      {busy ? <Loader2 size={14} className="animate-spin" /> : icon}
-      <span className="text-[10px] font-medium">{label}</span>
-    </button>
+    <div className="text-center">
+      <p className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</p>
+      <p className={`text-sm font-semibold ${color ?? 'text-gray-800'}`}>{value}</p>
+      {sub}
+    </div>
   )
 }

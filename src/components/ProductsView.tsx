@@ -15,7 +15,6 @@ import PriceChangeSheet from './products/PriceChangeSheet'
 import CreateItemSheet from './products/CreateItemSheet'
 import CreatePromoSheet from './products/CreatePromoSheet'
 import StockLocationSheet from './products/StockLocationSheet'
-import ScoutSheet from './products/ScoutSheet'
 import BulkPriceChangeSheet from './products/BulkPriceChangeSheet'
 import PrintLabelSheet from './products/PrintLabelSheet'
 import BulkPrintSheet from './products/BulkPrintSheet'
@@ -24,7 +23,7 @@ import BulkPromoSheet from './products/BulkPromoSheet'
 type Segment = 'all' | 'promo' | 'low'
 type DeptFilter = 'all' | 'WINE' | 'BEER' | 'SPIRITS' | 'LIQUEURS' | 'LIQUOR/MISC'
 type SortKey = 'revenue' | 'price' | 'qoh'
-type SheetType = 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'bulkPrice' | 'bulkPromo' | 'printLabel' | 'bulkPrint' | 'token' | null
+type SheetType = 'price' | 'promo' | 'location' | 'createItem' | 'bulkPrice' | 'bulkPromo' | 'printLabel' | 'bulkPrint' | 'token' | null
 
 const DEPT_FILTERS: { key: DeptFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -130,7 +129,7 @@ export default function ProductsView() {
   }, [resolveCode, handleSearch])
 
   // Handle action from ProductCard
-  function handleCardAction(item: StockItem, action: 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'printLabel') {
+  function handleCardAction(item: StockItem, action: 'price' | 'promo' | 'location' | 'createItem' | 'printLabel') {
     setSelectedItem(item)
     setActiveSheet(action)
   }
@@ -465,12 +464,7 @@ export default function ProductsView() {
           onClose={() => setActiveSheet(null)}
         />
       )}
-      {activeSheet === 'scout' && selectedItem && (
-        <ScoutSheet
-          item={selectedItem}
-          onClose={() => setActiveSheet(null)}
-        />
-      )}
+
       {activeSheet === 'bulkPrice' && (
         <BulkPriceChangeSheet
           items={items}
