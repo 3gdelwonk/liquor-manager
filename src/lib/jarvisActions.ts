@@ -64,17 +64,30 @@ export async function createItem(
 }
 
 export interface CreatePromoPayload {
-  barcode: string
-  promoPrice: number
+  barcodes: string[]
+  promoSellPrice: number
   startDate: string
   endDate: string
-  description?: string
+  sendToPos?: boolean
+  sendOffer?: boolean
+}
+
+export interface CreatePromoResult {
+  ok: boolean
+  success: boolean
+  promotions?: { barcode: string; description: string; ok: boolean; promoSell: number }[]
+  created?: number
+  posSent?: boolean
+  offerSent?: boolean
+  batchId?: string
+  message?: string
 }
 
 export async function createPromo(
   payload: CreatePromoPayload
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisPost('/api/pos-actions/create-promo', payload)
+): Promise<CreatePromoResult> {
+  const res = await jarvisPost<CreatePromoResult>('/api/pos-actions/create-promo', payload)
+  return { ...res, success: res.ok ?? res.success }
 }
 
 export interface PrintLabelResult {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, CheckCircle, Tag, Calendar } from 'lucide-react'
+import { Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { createPromo } from '../../lib/jarvisActions'
 
@@ -20,9 +20,12 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
   const [promoPrice, setPromoPrice] = useState('')
   const [startDate, setStartDate] = useState(today)
   const [endDate, setEndDate] = useState(twoWeeks)
+  const [sendToPos, setSendToPos] = useState(true)
+  const [sendOffer, setSendOffer] = useState(false)
+  const [printTalker, setPrintTalker] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
 
   const price = Number(promoPrice)
   const discount = item.sellPrice > 0 && price > 0
@@ -38,16 +41,20 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
     setError(null)
     try {
       const res = await createPromo({
-        barcode: item.barcode,
-        promoPrice: price,
+        barcodes: [item.barcode],
+        promoSellPrice: price,
         startDate,
         endDate,
-        description: item.description,
+        sendToPos,
+        sendOffer,
       })
       if (res.success) {
-        setSuccess(true)
+        const parts: string[] = [`Promotion created`]
+        if (res.posSent) parts.push('sent to POS')
+        if (res.offerSent) parts.push('portal updated')
+        setResult(parts.join(' · '))
         onSuccess()
-        setTimeout(onClose, 1200)
+        setTimeout(onClose, 1500)
       } else {
         setError(res.message ?? 'Failed to create promotion')
       }
@@ -108,7 +115,7 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
-              <Calendar size={12} /> Start Date
+              <Calendar size={12} /> Start
             </label>
             <input
               type="date"
@@ -119,7 +126,7 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
-              <Calendar size={12} /> End Date
+              <Calendar size={12} /> End
             </label>
             <input
               type="date"
@@ -130,18 +137,44 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
           </div>
         </div>
 
+        {/* Toggles */}
+        <div className="space-y-2">
+          <Toggle checked={sendToPos} onChange={setSendToPos} icon={<Send size={14} />} label="Send to POS terminal" color="violet" />
+          <Toggle checked={sendOffer} onChange={setSendOffer} icon={<Megaphone size={14} />} label="Update Smart Retail portal" color="violet" />
+          <Toggle checked={printTalker} onChange={setPrintTalker} icon={<Printer size={14} />} label="Print promo talker" color="gray" disabled />
+          {printTalker && <p className="text-[10px] text-gray-400 ml-14">Talker printing coming soon</p>}
+        </div>
+
         {/* Create button */}
         <button
           onClick={handleCreate}
           disabled={busy || !price || price <= 0 || !item.barcode || !startDate || !endDate}
           className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
         >
-          {busy ? <Loader2 size={16} className="animate-spin" /> : success ? <CheckCircle size={16} /> : null}
-          {success ? 'Promotion Created!' : busy ? 'Creating...' : 'Create Promotion & Send to POS'}
+          {busy ? <Loader2 size={16} className="animate-spin" /> : result ? <CheckCircle size={16} /> : null}
+          {result ? result : busy ? 'Creating...' : 'Create Promotion'}
         </button>
 
         {error && <p className="text-xs text-red-600 font-medium text-center">{error}</p>}
       </div>
     </div>
+  )
+}
+
+function Toggle({ checked, onChange, icon, label, color = 'violet', disabled }: {
+  checked: boolean; onChange: (v: boolean) => void; icon: React.ReactNode; label: string; color?: string; disabled?: boolean
+}) {
+  const bg = disabled ? 'bg-gray-200' : checked ? (color === 'violet' ? 'bg-violet-600' : 'bg-gray-400') : 'bg-gray-300'
+  return (
+    <label className={`flex items-center gap-3 ${disabled ? 'opacity-50' : 'cursor-pointer'}`}>
+      <div className="relative">
+        <input type="checkbox" checked={checked} onChange={e => !disabled && onChange(e.target.checked)} className="sr-only" disabled={disabled} />
+        <div className={`w-10 h-5 rounded-full transition-colors ${bg}`} />
+        <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      </div>
+      <div className="flex items-center gap-1.5 text-sm text-gray-700">
+        {icon} {label}
+      </div>
+    </label>
   )
 }
