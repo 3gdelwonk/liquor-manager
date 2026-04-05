@@ -6,7 +6,7 @@ import { changePriceAndSend, changePriceOnly } from '../../lib/jarvisActions'
 interface PriceChangeSheetProps {
   item: StockItem
   onClose: () => void
-  onSuccess: () => void
+  onSuccess: (newPrice: number) => void
 }
 
 function fmtMoney(n: number) {
@@ -38,7 +38,7 @@ export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChan
         : await changePriceOnly(item.barcode, price)
       if (res.success) {
         setSuccess(true)
-        onSuccess()
+        onSuccess(price)
         setTimeout(onClose, 1200)
       } else {
         setError(res.message ?? 'Price change failed')

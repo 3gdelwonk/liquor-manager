@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin, Compass,
-  Printer, Send, Loader2, Calendar,
+  Printer, Send, Loader2, Calendar, RefreshCw,
   Box, Truck, BarChart3
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus } from '../../lib/jarvis'
@@ -72,13 +72,15 @@ interface ProductCardProps {
   promo: LivePromotion | undefined
   isTracked: boolean
   onAction: (action: 'price' | 'promo' | 'location' | 'scout' | 'createItem') => void
+  onRefresh?: () => Promise<void>
 }
 
-export default function ProductCard({ item, promo, isTracked, onAction }: ProductCardProps) {
+export default function ProductCard({ item, promo, isTracked, onAction, onRefresh }: ProductCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
   const [posStatus, setPosStatus] = useState<PosStatus | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   // Stock adjustment inline
   const [stockAdj, setStockAdj] = useState('')
@@ -267,13 +269,29 @@ export default function ProductCard({ item, promo, isTracked, onAction }: Produc
           )}
 
           {/* Action buttons */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <ActionBtn icon={<DollarSign size={14} />} label="Change Price" onClick={() => onAction('price')} />
             <ActionBtn icon={<Tag size={14} />} label="Create Promo" onClick={() => onAction('promo')} />
             <ActionBtn icon={<MapPin size={14} />} label="Location" onClick={() => onAction('location')} />
             <ActionBtn icon={<Compass size={14} />} label="Scout" onClick={() => onAction('scout')} />
             <ActionBtn icon={<Send size={14} />} label="Send to POS" onClick={handleSendToPos} busy={sendBusy} />
             <ActionBtn icon={<Printer size={14} />} label="Print Label" onClick={handlePrintLabel} busy={printBusy} />
+            <ActionBtn
+              icon={<RefreshCw size={14} />}
+              label="Refresh"
+              busy={refreshing}
+              onClick={async () => {
+                if (!onRefresh) return
+                setRefreshing(true)
+                try {
+                  await onRefresh()
+                  setOrderInfo(null)
+                  setPosStatus(null)
+                } finally {
+                  setRefreshing(false)
+                }
+              }}
+            />
           </div>
 
           {actionMsg && (

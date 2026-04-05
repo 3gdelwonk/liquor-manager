@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package } from 'lucide-react'
+import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, searchItems,
   LIQUOR_DEPT_NAMES,
@@ -16,11 +16,12 @@ import CreateItemSheet from './products/CreateItemSheet'
 import CreatePromoSheet from './products/CreatePromoSheet'
 import StockLocationSheet from './products/StockLocationSheet'
 import ScoutSheet from './products/ScoutSheet'
+import BulkPriceChangeSheet from './products/BulkPriceChangeSheet'
 
 type Segment = 'all' | 'promo' | 'low'
 type DeptFilter = 'all' | 'WINE' | 'BEER' | 'SPIRITS' | 'LIQUEURS' | 'LIQUOR/MISC'
 type SortKey = 'revenue' | 'price' | 'qoh'
-type SheetType = 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'token' | null
+type SheetType = 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'bulkPrice' | 'token' | null
 
 const DEPT_FILTERS: { key: DeptFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -51,6 +52,8 @@ export default function ProductsView() {
   const [activeSheet, setActiveSheet] = useState<SheetType>(null)
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null)
   const [cloudRefreshTrigger, setCloudRefreshTrigger] = useState(0)
+
+  const [fabOpen, setFabOpen] = useState(false)
 
   const trackedItemCodes = useTrackedItemCodes()
   const { resolveCode } = useProductCodeLookup()
@@ -128,6 +131,29 @@ export default function ProductsView() {
     setSelectedItem(item)
     setActiveSheet(action)
   }
+
+  // Refresh a single item from the server
+  const refreshItem = useCallback(async (itemCode: string) => {
+    try {
+      const res = await searchItems(itemCode, 5)
+      const match = res.items.find(i => i.itemCode === itemCode)
+      if (match) {
+        setItems(prev => prev.map(i => i.itemCode === itemCode ? match : i))
+        // Also update selectedItem if it's the same
+        setSelectedItem(prev => prev?.itemCode === itemCode ? match : prev)
+      }
+    } catch { /* keep existing data */ }
+  }, [])
+
+  // Optimistic price update — called by PriceChangeSheet on success
+  const updateItemPrice = useCallback((itemCode: string, newPrice: number) => {
+    setItems(prev => prev.map(i =>
+      i.itemCode === itemCode ? { ...i, sellPrice: newPrice } : i
+    ))
+    setSelectedItem(prev =>
+      prev?.itemCode === itemCode ? { ...prev, sellPrice: newPrice } : prev
+    )
+  }, [])
 
   // Apply filters + sort
   const displayed = useMemo(() => {
@@ -343,18 +369,38 @@ export default function ProductsView() {
             promo={promoMap.get(item.itemCode)}
             isTracked={trackedItemCodes.has(item.itemCode)}
             onAction={(action) => handleCardAction(item, action)}
+            onRefresh={() => refreshItem(item.itemCode)}
           />
         ))}
       </div>
 
-      {/* FAB — Create Item */}
-      <button
-        onClick={() => setActiveSheet('createItem')}
-        className="fixed bottom-20 right-4 z-30 w-12 h-12 bg-violet-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-violet-700 active:scale-95 transition-transform"
-        title="Add new item"
-      >
-        <Plus size={20} />
-      </button>
+      {/* FAB Menu */}
+      <div className="fixed bottom-20 right-4 z-30 flex flex-col items-end gap-2">
+        {fabOpen && (
+          <>
+            <button
+              onClick={() => { setFabOpen(false); setActiveSheet('createItem') }}
+              className="flex items-center gap-2 px-3 py-2 bg-white rounded-full shadow-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+            >
+              <Package size={16} className="text-violet-500" /> New Item
+            </button>
+            <button
+              onClick={() => { setFabOpen(false); setActiveSheet('bulkPrice') }}
+              className="flex items-center gap-2 px-3 py-2 bg-white rounded-full shadow-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+            >
+              <ListPlus size={16} className="text-violet-500" /> Bulk Price Change
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => setFabOpen(o => !o)}
+          className={`w-12 h-12 bg-violet-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-violet-700 active:scale-95 transition-all ${fabOpen ? 'rotate-45' : ''}`}
+          title="Actions"
+        >
+          <Plus size={20} />
+        </button>
+      </div>
+      {fabOpen && <div className="fixed inset-0 z-20" onClick={() => setFabOpen(false)} />}
 
       {/* Barcode Scanner */}
       <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
@@ -370,7 +416,11 @@ export default function ProductsView() {
         <PriceChangeSheet
           item={selectedItem}
           onClose={() => setActiveSheet(null)}
-          onSuccess={fetchData}
+          onSuccess={(newPrice) => {
+            updateItemPrice(selectedItem.itemCode, newPrice)
+            // Also do a background full refresh for eventual consistency
+            fetchData()
+          }}
         />
       )}
       {activeSheet === 'createItem' && (
@@ -396,6 +446,13 @@ export default function ProductsView() {
         <ScoutSheet
           item={selectedItem}
           onClose={() => setActiveSheet(null)}
+        />
+      )}
+      {activeSheet === 'bulkPrice' && (
+        <BulkPriceChangeSheet
+          items={items}
+          onClose={() => setActiveSheet(null)}
+          onSuccess={fetchData}
         />
       )}
     </div>
