@@ -19,7 +19,7 @@ import ScoutSheet from './products/ScoutSheet'
 
 type Segment = 'all' | 'promo' | 'low'
 type DeptFilter = 'all' | 'WINE' | 'BEER' | 'SPIRITS' | 'LIQUEURS' | 'LIQUOR/MISC'
-type SortKey = 'name' | 'price' | 'qoh' | 'status'
+type SortKey = 'revenue' | 'price' | 'qoh'
 type SheetType = 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'token' | null
 
 const DEPT_FILTERS: { key: DeptFilter; label: string }[] = [
@@ -43,7 +43,7 @@ export default function ProductsView() {
   // Filters
   const [segment, setSegment] = useState<Segment>('all')
   const [deptFilter, setDeptFilter] = useState<DeptFilter>('all')
-  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [search, setSearch] = useState('')
   const [scannerOpen, setScannerOpen] = useState(false)
 
@@ -158,14 +158,9 @@ export default function ProductsView() {
     // Sort
     list = [...list].sort((a, b) => {
       switch (sortKey) {
-        case 'name': return a.description.localeCompare(b.description)
+        case 'revenue': return (b.avgDayQty * b.sellPrice) - (a.avgDayQty * a.sellPrice)
         case 'price': return b.sellPrice - a.sellPrice
         case 'qoh': return a.onHand - b.onHand
-        case 'status': {
-          const sa = a.onHand < a.reorderLevel ? 0 : 1
-          const sb = b.onHand < b.reorderLevel ? 0 : 1
-          return sa - sb
-        }
         default: return 0
       }
     })
@@ -314,10 +309,9 @@ export default function ProductsView() {
       <div className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-100">
         <span className="text-xs text-gray-400">Sort:</span>
         {([
-          { key: 'name' as SortKey, label: 'Name' },
+          { key: 'revenue' as SortKey, label: 'Revenue' },
           { key: 'price' as SortKey, label: 'Price' },
           { key: 'qoh' as SortKey, label: 'QOH' },
-          { key: 'status' as SortKey, label: 'Status' },
         ]).map(s => (
           <button
             key={s.key}
