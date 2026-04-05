@@ -682,6 +682,39 @@ export async function getDepartmentList(): Promise<Department[]> {
   return Array.isArray(raw) ? raw : raw.departments;
 }
 
+// ── Printers & Label Queue ──────────────────────────────────────────────────
+
+export interface Printer {
+  id: number;
+  name: string;
+  networkPath: string;
+  isLabel: boolean;
+  isReport: boolean;
+  queueId: string;
+  queueRunning: boolean;
+}
+
+export interface LabelQueueItem {
+  barcode: string;
+  itemCode: string;
+  description: string;
+  sellPrice: number;
+  normalPrice: number;
+  count: number;
+  printerId: number | null;
+  batchId: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export async function getPrinters(): Promise<Printer[]> {
+  return jarvisFetch<Printer[]>('/api/pos/printers');
+}
+
+export async function getLabelQueue(): Promise<{ pending: number; items: LabelQueueItem[] }> {
+  return jarvisFetch<{ pending: number; items: LabelQueueItem[] }>('/api/pos/label-queue');
+}
+
 // ── SerpApi Intelligence ─────────────────────────────────────────────────────
 
 export interface ShoppingResult {

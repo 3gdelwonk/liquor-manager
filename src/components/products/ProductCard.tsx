@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin, Compass,
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
-  Box, Truck, BarChart3
+  Box, Truck, BarChart3,
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal } from '../../lib/jarvis'
-import { adjustStock, sendItemToPos, printLabel, togglePriceLock } from '../../lib/jarvisActions'
+import { adjustStock, sendItemToPos, togglePriceLock } from '../../lib/jarvisActions'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 
@@ -71,7 +71,7 @@ interface ProductCardProps {
   item: StockItem
   promo: LivePromotion | undefined
   isTracked: boolean
-  onAction: (action: 'price' | 'promo' | 'location' | 'scout' | 'createItem') => void
+  onAction: (action: 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'printLabel') => void
   onRefresh?: () => Promise<void>
   onToggleLock?: (locked: boolean) => void
 }
@@ -92,7 +92,6 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
 
   // Direct action states
   const [sendBusy, setSendBusy] = useState(false)
-  const [printBusy, setPrintBusy] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
 
   const status = statusLabel(item.onHand, item.reorderLevel)
@@ -140,20 +139,6 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
       setActionMsg((err as Error).message)
     } finally {
       setSendBusy(false)
-    }
-  }
-
-  async function handlePrintLabel() {
-    if (!item.barcode) return
-    setPrintBusy(true)
-    setActionMsg(null)
-    try {
-      const res = await printLabel(item.barcode)
-      setActionMsg(res.success ? 'Label queued' : (res.message ?? 'Failed'))
-    } catch (err) {
-      setActionMsg((err as Error).message)
-    } finally {
-      setPrintBusy(false)
     }
   }
 
@@ -295,7 +280,7 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
             <ActionBtn icon={<MapPin size={14} />} label="Location" onClick={() => onAction('location')} />
             <ActionBtn icon={<Compass size={14} />} label="Scout" onClick={() => onAction('scout')} />
             <ActionBtn icon={<Send size={14} />} label="Send to POS" onClick={handleSendToPos} busy={sendBusy} />
-            <ActionBtn icon={<Printer size={14} />} label="Print Label" onClick={handlePrintLabel} busy={printBusy} />
+            <ActionBtn icon={<Printer size={14} />} label="Print Label" onClick={() => onAction('printLabel')} />
             <ActionBtn
               icon={item.priceLocked ? <Unlock size={14} /> : <Lock size={14} />}
               label={item.priceLocked ? 'Unlock Price' : 'Lock Price'}

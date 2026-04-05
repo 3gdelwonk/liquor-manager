@@ -77,10 +77,34 @@ export async function createPromo(
   return jarvisPost('/api/pos-actions/create-promo', payload)
 }
 
-export async function printLabel(
+export interface PrintLabelOptions {
   barcode: string
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisPost('/api/pos-actions/print-label', { barcode })
+  printerId?: number
+  qty?: number
+  format?: string
+}
+
+export interface PrintLabelResult {
+  ok: boolean
+  success: boolean
+  barcode: string
+  description?: string
+  price?: number
+  labelCount?: number
+  batchId?: string
+  message?: string
+}
+
+export async function printLabel(
+  barcode: string,
+  options?: { printerId?: number; qty?: number; format?: string }
+): Promise<PrintLabelResult> {
+  const body: Record<string, unknown> = { barcode }
+  if (options?.printerId) body.printerId = options.printerId
+  if (options?.qty && options.qty > 1) body.qty = options.qty
+  if (options?.format) body.format = options.format
+  const res = await jarvisPost<PrintLabelResult>('/api/pos-actions/print-label', body)
+  return { ...res, success: res.ok ?? res.success }
 }
 
 // ── Price Lock ──────────────────────────────────────────────────────────────

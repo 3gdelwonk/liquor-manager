@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus } from 'lucide-react'
+import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, searchItems,
   LIQUOR_DEPT_NAMES,
@@ -17,11 +17,13 @@ import CreatePromoSheet from './products/CreatePromoSheet'
 import StockLocationSheet from './products/StockLocationSheet'
 import ScoutSheet from './products/ScoutSheet'
 import BulkPriceChangeSheet from './products/BulkPriceChangeSheet'
+import PrintLabelSheet from './products/PrintLabelSheet'
+import BulkPrintSheet from './products/BulkPrintSheet'
 
 type Segment = 'all' | 'promo' | 'low'
 type DeptFilter = 'all' | 'WINE' | 'BEER' | 'SPIRITS' | 'LIQUEURS' | 'LIQUOR/MISC'
 type SortKey = 'revenue' | 'price' | 'qoh'
-type SheetType = 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'bulkPrice' | 'token' | null
+type SheetType = 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'bulkPrice' | 'printLabel' | 'bulkPrint' | 'token' | null
 
 const DEPT_FILTERS: { key: DeptFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -127,7 +129,7 @@ export default function ProductsView() {
   }, [resolveCode, handleSearch])
 
   // Handle action from ProductCard
-  function handleCardAction(item: StockItem, action: 'price' | 'promo' | 'location' | 'scout' | 'createItem') {
+  function handleCardAction(item: StockItem, action: 'price' | 'promo' | 'location' | 'scout' | 'createItem' | 'printLabel') {
     setSelectedItem(item)
     setActiveSheet(action)
   }
@@ -398,6 +400,12 @@ export default function ProductsView() {
             >
               <ListPlus size={16} className="text-violet-500" /> Bulk Price Change
             </button>
+            <button
+              onClick={() => { setFabOpen(false); setActiveSheet('bulkPrint') }}
+              className="flex items-center gap-2 px-3 py-2 bg-white rounded-full shadow-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+            >
+              <Printer size={16} className="text-violet-500" /> Bulk Print Labels
+            </button>
           </>
         )}
         <button
@@ -461,6 +469,18 @@ export default function ProductsView() {
           items={items}
           onClose={() => setActiveSheet(null)}
           onSuccess={fetchData}
+        />
+      )}
+      {activeSheet === 'printLabel' && selectedItem && (
+        <PrintLabelSheet
+          item={selectedItem}
+          onClose={() => setActiveSheet(null)}
+        />
+      )}
+      {activeSheet === 'bulkPrint' && (
+        <BulkPrintSheet
+          items={items}
+          onClose={() => setActiveSheet(null)}
         />
       )}
     </div>
