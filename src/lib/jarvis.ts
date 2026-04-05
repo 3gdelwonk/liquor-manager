@@ -554,10 +554,13 @@ export interface CloudStatus {
   loggedIn: boolean;
   tokenAge?: string;
   lastRenewal?: string;
+  renewsIn?: string;
+  expiresIn?: string;
   workingHours?: boolean;
+  schedule?: string;
+  currentHour?: string;
   loginInProgress?: boolean;
   message?: string;
-  [key: string]: unknown;
 }
 
 export async function getCloudStatus(): Promise<CloudStatus> {
@@ -567,10 +570,13 @@ export async function getCloudStatus(): Promise<CloudStatus> {
       loggedIn: !!(raw.hasToken ?? raw.loggedIn ?? raw.connected),
       tokenAge: raw.tokenAge as string | undefined,
       lastRenewal: raw.lastRenewal as string | undefined,
+      renewsIn: raw.renewsIn as string | undefined,
+      expiresIn: raw.expiresIn as string | undefined,
       workingHours: raw.workingHours as boolean | undefined,
+      schedule: raw.schedule as string | undefined,
+      currentHour: raw.currentHour as string | undefined,
       loginInProgress: raw.loginInProgress as boolean | undefined,
       message: raw.message as string | undefined,
-      ...raw,
     };
   } catch {
     return { loggedIn: false, message: 'Cannot reach POS cloud' };
