@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, memo, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
@@ -17,6 +17,18 @@ const DEPT_COLORS: Record<string, string> = {
   LIQUEURS:      'bg-amber-100 text-amber-700',
   'LIQUOR/MISC': 'bg-pink-100 text-pink-700',
 }
+
+export const REASON_CODES = [
+  'Breakage',
+  'Theft/Shrinkage',
+  'Stocktake correction',
+  'Damaged goods',
+  'Staff use',
+  'Promo/Sample',
+  'Return to supplier',
+  'Received stock',
+  'Other',
+]
 
 function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -76,11 +88,15 @@ interface ProductCardProps {
   onToggleLock?: (locked: boolean) => void
 }
 
-export default function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock }: ProductCardProps) {
+function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock }: ProductCardProps) {
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
+
   const [expanded, setExpanded] = useState(false)
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
   const [posStatus, setPosStatus] = useState<PosStatus | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const detailLoaded = useRef(false)
   const [refreshing, setRefreshing] = useState(false)
   const [lockBusy, setLockBusy] = useState(false)
 
@@ -102,113 +118,129 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
   // Direct action states
   const [sendBusy, setSendBusy] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const msgTimer = useRef<ReturnType<typeof setTimeout>>()
+
+  function flashMsg(msg: string) {
+    setActionMsg(msg)
+    clearTimeout(msgTimer.current)
+    msgTimer.current = setTimeout(() => { if (mounted.current) setActionMsg(null) }, 3000)
+  }
+
+  function flashLocMsg(msg: string) {
+    setLocMsg(msg)
+    clearTimeout(msgTimer.current)
+    msgTimer.current = setTimeout(() => { if (mounted.current) setLocMsg(null) }, 3000)
+  }
 
   const status = statusLabel(item.onHand, item.reorderLevel)
   const badgeClass = DEPT_COLORS[item.department] ?? 'bg-gray-100 text-gray-600'
 
-  // Lazy-load detail on expand
+  // Lazy-load detail on expand (fixed: no orderInfo/posStatus in deps)
   useEffect(() => {
-    if (!expanded) return
-    if (orderInfo && posStatus) return
+    if (!expanded || detailLoaded.current) return
+    detailLoaded.current = true
     setDetailLoading(true)
     Promise.allSettled([
       getOrderInfo(item.itemCode),
       item.barcode ? getPosStatus(item.barcode) : Promise.resolve(null),
-    ]).then(([oi, ps]) => {
+      getItemLocations(item.itemCode),
+    ]).then(([oi, ps, locs]) => {
+      if (!mounted.current) return
       if (oi.status === 'fulfilled' && oi.value) setOrderInfo(oi.value)
       if (ps.status === 'fulfilled' && ps.value) setPosStatus(ps.value as PosStatus)
-    }).finally(() => setDetailLoading(false))
-  }, [expanded, item.itemCode, item.barcode, orderInfo, posStatus])
+      if (locs.status === 'fulfilled' && locs.value) setItemLocations(locs.value as ItemLocation[])
+    }).finally(() => { if (mounted.current) setDetailLoading(false) })
+  }, [expanded, item.itemCode, item.barcode])
 
-  // Load locations when panel opens
+  // Memoize available locations for assignment
+  const availableLocations = useMemo(() => {
+    const assigned = new Set(itemLocations.map(il => il.locationId))
+    return allLocations.filter(l => !assigned.has(l.id))
+  }, [allLocations, itemLocations])
+
+  // Load all locations when panel opens
   useEffect(() => {
     if (!showLocationPanel) return
     setLocLoading(true)
-    Promise.all([
-      getLocations(),
-      getItemLocations(item.itemCode),
-    ]).then(([all, curr]) => {
-      setAllLocations(all.filter(l => l.active))
-      setItemLocations(curr)
-    }).catch(() => setLocMsg('Failed to load locations'))
-      .finally(() => setLocLoading(false))
-  }, [showLocationPanel, item.itemCode])
+    getLocations()
+      .then(all => { if (mounted.current) setAllLocations(all.filter(l => l.active)) })
+      .catch(() => { if (mounted.current) flashLocMsg('Failed to load locations') })
+      .finally(() => { if (mounted.current) setLocLoading(false) })
+  }, [showLocationPanel])
 
   async function handleAssignLocation() {
     if (!selectedLocId) return
     setLocBusy(true)
-    setLocMsg(null)
     try {
       const res = await assignItemLocation(Number(selectedLocId), item.itemCode)
+      if (!mounted.current) return
       if (res.success) {
-        setLocMsg('Assigned')
+        flashLocMsg('Assigned')
         const updated = await getItemLocations(item.itemCode)
-        setItemLocations(updated)
-        setSelectedLocId('')
+        if (mounted.current) { setItemLocations(updated); setSelectedLocId('') }
       } else {
-        setLocMsg(res.message ?? 'Failed')
+        flashLocMsg(res.message ?? 'Failed')
       }
     } catch (err) {
-      setLocMsg((err as Error).message)
+      if (mounted.current) flashLocMsg((err as Error).message)
     } finally {
-      setLocBusy(false)
+      if (mounted.current) setLocBusy(false)
     }
   }
 
   async function handleCreateAndAssign() {
     if (!newAisle.trim() || !newBay.trim()) return
     setLocBusy(true)
-    setLocMsg(null)
     try {
       const res = await createLocation(newAisle.trim(), newBay.trim(), newLocDesc.trim() || undefined)
+      if (!mounted.current) return
       if (res.success && res.id) {
         await assignItemLocation(res.id, item.itemCode)
-        setLocMsg('Location created & assigned')
+        if (!mounted.current) return
+        flashLocMsg('Location created & assigned')
         const [all, curr] = await Promise.all([getLocations(), getItemLocations(item.itemCode)])
+        if (!mounted.current) return
         setAllLocations(all.filter(l => l.active))
         setItemLocations(curr)
-        setNewAisle('')
-        setNewBay('')
-        setNewLocDesc('')
+        setNewAisle(''); setNewBay(''); setNewLocDesc('')
       } else {
-        setLocMsg(res.message ?? 'Failed to create location')
+        flashLocMsg(res.message ?? 'Failed to create location')
       }
     } catch (err) {
-      setLocMsg((err as Error).message)
+      if (mounted.current) flashLocMsg((err as Error).message)
     } finally {
-      setLocBusy(false)
+      if (mounted.current) setLocBusy(false)
     }
   }
 
   async function handleRemoveLocation(loc: ItemLocation) {
     setLocBusy(true)
-    setLocMsg(null)
     try {
       const res = await removeItemLocation(loc.locationId, item.itemCode)
+      if (!mounted.current) return
       if (res.success) {
         setItemLocations(prev => prev.filter(l => l.locationId !== loc.locationId))
-        setLocMsg('Removed')
+        flashLocMsg('Removed')
       } else {
-        setLocMsg(res.message ?? 'Failed')
+        flashLocMsg(res.message ?? 'Failed')
       }
     } catch (err) {
-      setLocMsg((err as Error).message)
+      if (mounted.current) flashLocMsg((err as Error).message)
     } finally {
-      setLocBusy(false)
+      if (mounted.current) setLocBusy(false)
     }
   }
 
   async function handleSendToPos() {
     if (!item.barcode) return
     setSendBusy(true)
-    setActionMsg(null)
     try {
       const res = await sendItemToPos(item.barcode)
-      setActionMsg(res.success ? 'Sent to POS' : (res.message ?? 'Failed'))
+      if (mounted.current) flashMsg(res.success ? 'Sent to POS' : (res.message ?? 'Failed'))
     } catch (err) {
-      setActionMsg((err as Error).message)
+      if (mounted.current) flashMsg((err as Error).message)
     } finally {
-      setSendBusy(false)
+      if (mounted.current) setSendBusy(false)
     }
   }
 
@@ -216,16 +248,15 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
     if (!item.barcode) return
     const newLocked = !item.priceLocked
     setLockBusy(true)
-    setActionMsg(null)
     try {
       await togglePriceLock(item.barcode, newLocked)
     } catch {
       // Server may not support it yet — continue with local-only
     }
-    // Always persist locally for immediate UI feedback
+    if (!mounted.current) return
     setPriceLockLocal(item.barcode, newLocked)
     onToggleLock?.(newLocked)
-    setActionMsg(newLocked ? 'Price locked' : 'Price unlocked')
+    flashMsg(newLocked ? 'Price locked' : 'Price unlocked')
     setLockBusy(false)
   }
 
@@ -333,6 +364,21 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
                   </span>
                 </div>
               )}
+
+              {/* Location summary row — tappable to open panel */}
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowLocationPanel(p => !p) }}
+                className="w-full flex items-center gap-1.5 text-xs px-1 py-1 rounded-lg hover:bg-blue-50 transition-colors text-left"
+              >
+                <MapPin size={10} className="text-blue-500 shrink-0" />
+                {itemLocations.length > 0 ? (
+                  <span className="text-gray-600">
+                    {itemLocations.map(l => `Aisle ${l.aisle}, Bay ${l.bay}`).join(' · ')}
+                  </span>
+                ) : (
+                  <span className="text-gray-400 italic">No location set — tap to assign</span>
+                )}
+              </button>
             </>
           )}
 
@@ -446,7 +492,7 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
                   )}
 
                   {/* Assign existing location */}
-                  {allLocations.filter(l => !itemLocations.some(il => il.locationId === l.id)).length > 0 && (
+                  {availableLocations.length > 0 && (
                     <div className="flex gap-1.5 items-center">
                       <select
                         value={selectedLocId}
@@ -455,13 +501,11 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
                         className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
                       >
                         <option value="">Assign existing...</option>
-                        {allLocations
-                          .filter(l => !itemLocations.some(il => il.locationId === l.id))
-                          .map(l => (
-                            <option key={l.id} value={l.id}>
-                              Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
-                            </option>
-                          ))}
+                        {availableLocations.map(l => (
+                          <option key={l.id} value={l.id}>
+                            Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
+                          </option>
+                        ))}
                       </select>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleAssignLocation() }}
@@ -550,10 +594,13 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
                 setRefreshing(true)
                 try {
                   await onRefresh()
+                  if (!mounted.current) return
+                  // Reset detail so next expand re-fetches
+                  detailLoaded.current = false
                   setOrderInfo(null)
                   setPosStatus(null)
                 } finally {
-                  setRefreshing(false)
+                  if (mounted.current) setRefreshing(false)
                 }
               }}
               disabled={refreshing}
@@ -577,7 +624,7 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
           item={item}
           onClose={() => setShowAdjustSheet(false)}
           onSuccess={(msg) => {
-            setActionMsg(msg)
+            flashMsg(msg)
             setShowAdjustSheet(false)
             onRefresh?.()
           }}
@@ -586,6 +633,17 @@ export default function ProductCard({ item, promo, isTracked, onAction, onRefres
     </div>
   )
 }
+
+// Custom comparator — ignores callback identity changes
+export default memo(ProductCard, (prev, next) =>
+  prev.item.itemCode === next.item.itemCode &&
+  prev.item.sellPrice === next.item.sellPrice &&
+  prev.item.onHand === next.item.onHand &&
+  prev.item.priceLocked === next.item.priceLocked &&
+  prev.item.avgCost === next.item.avgCost &&
+  prev.promo === next.promo &&
+  prev.isTracked === next.isTracked
+)
 
 function MetricCell({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: React.ReactNode }) {
   return (
@@ -596,18 +654,6 @@ function MetricCell({ label, value, color, sub }: { label: string; value: string
     </div>
   )
 }
-
-const REASON_CODES = [
-  'Breakage',
-  'Theft/Shrinkage',
-  'Stocktake correction',
-  'Damaged goods',
-  'Staff use',
-  'Promo/Sample',
-  'Return to supplier',
-  'Received stock',
-  'Other',
-]
 
 function AdjustStockSheet({ item, onClose, onSuccess }: {
   item: StockItem
@@ -621,7 +667,7 @@ function AdjustStockSheet({ item, onClose, onSuccess }: {
   const [error, setError] = useState<string | null>(null)
 
   const qty = Number(newQty)
-  const diff = !isNaN(qty) && newQty !== '' ? qty - item.onHand : null
+  const diff = !isNaN(qty) && newQty !== '' ? Math.round(qty) - item.onHand : null
 
   async function handleApply() {
     if (diff === null || diff === 0 || !item.barcode) return
@@ -717,7 +763,7 @@ function AdjustStockSheet({ item, onClose, onSuccess }: {
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : null}
           {busy ? 'Adjusting...' : diff !== null && diff !== 0
-            ? `Set QOH to ${qty} (${diff > 0 ? '+' : ''}${diff})`
+            ? `Set QOH to ${Math.round(qty)} (${diff > 0 ? '+' : ''}${diff})`
             : 'Enter new quantity'}
         </button>
 

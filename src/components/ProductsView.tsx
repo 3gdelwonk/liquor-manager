@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer, Tag } from 'lucide-react'
+import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer, Tag, MapPin, ClipboardList } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, searchItems,
   LIQUOR_DEPT_NAMES,
@@ -18,11 +18,13 @@ import BulkPriceChangeSheet from './products/BulkPriceChangeSheet'
 import PrintLabelSheet from './products/PrintLabelSheet'
 import BulkPrintSheet from './products/BulkPrintSheet'
 import BulkPromoSheet from './products/BulkPromoSheet'
+import BulkLocationSheet from './products/BulkLocationSheet'
+import BulkAdjustSheet from './products/BulkAdjustSheet'
 
 type Segment = 'all' | 'promo' | 'low'
 type DeptFilter = 'all' | 'WINE' | 'BEER' | 'SPIRITS' | 'LIQUEURS' | 'LIQUOR/MISC'
 type SortKey = 'revenue' | 'price' | 'qoh'
-type SheetType = 'price' | 'promo' | 'createItem' | 'bulkPrice' | 'bulkPromo' | 'printLabel' | 'bulkPrint' | 'token' | null
+type SheetType = 'price' | 'promo' | 'createItem' | 'bulkPrice' | 'bulkPromo' | 'printLabel' | 'bulkPrint' | 'bulkLocation' | 'bulkAdjust' | 'token' | null
 
 const DEPT_FILTERS: { key: DeptFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -55,6 +57,7 @@ export default function ProductsView() {
   const [cloudRefreshTrigger, setCloudRefreshTrigger] = useState(0)
 
   const [fabOpen, setFabOpen] = useState(false)
+  const [displayLimit, setDisplayLimit] = useState(50)
 
   const trackedItemCodes = useTrackedItemCodes()
   const { resolveCode } = useProductCodeLookup()
@@ -223,6 +226,12 @@ export default function ProductsView() {
 
   const totalFiltered = Object.values(deptCounts).reduce((s, c) => s + c, 0)
 
+  // Reset pagination when filters change
+  useEffect(() => { setDisplayLimit(50) }, [search, segment, deptFilter, sortKey])
+
+  // Paginated display
+  const paginatedDisplay = useMemo(() => displayed.slice(0, displayLimit), [displayed, displayLimit])
+
   // Segment counts
   const promoCt = useMemo(() => items.filter(i => promoMap.has(i.itemCode)).length, [items, promoMap])
   const lowCt = useMemo(() => items.filter(i => i.onHand < i.reorderLevel).length, [items])
@@ -370,7 +379,7 @@ export default function ProductsView() {
             </p>
           </div>
         )}
-        {displayed.map(item => (
+        {paginatedDisplay.map(item => (
           <ProductCard
             key={item.itemCode}
             item={item}
@@ -381,6 +390,14 @@ export default function ProductsView() {
             onToggleLock={(locked) => toggleItemLock(item.itemCode, locked)}
           />
         ))}
+        {displayLimit < displayed.length && (
+          <button
+            onClick={() => setDisplayLimit(prev => prev + 50)}
+            className="w-full py-3 text-sm font-medium text-violet-600 bg-violet-50 rounded-lg hover:bg-violet-100 transition-colors"
+          >
+            Show more ({displayed.length - displayLimit} remaining)
+          </button>
+        )}
       </div>
 
       {/* FAB Menu */}
@@ -410,6 +427,18 @@ export default function ProductsView() {
               className="flex items-center gap-2 px-3 py-2 bg-white rounded-full shadow-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
             >
               <Printer size={16} className="text-violet-500" /> Bulk Print Labels
+            </button>
+            <button
+              onClick={() => { setFabOpen(false); setActiveSheet('bulkLocation') }}
+              className="flex items-center gap-2 px-3 py-2 bg-white rounded-full shadow-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+            >
+              <MapPin size={16} className="text-blue-500" /> Bulk Location
+            </button>
+            <button
+              onClick={() => { setFabOpen(false); setActiveSheet('bulkAdjust') }}
+              className="flex items-center gap-2 px-3 py-2 bg-white rounded-full shadow-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
+            >
+              <ClipboardList size={16} className="text-emerald-500" /> Bulk QOH Adjust
             </button>
           </>
         )}
@@ -481,6 +510,19 @@ export default function ProductsView() {
         <BulkPrintSheet
           items={items}
           onClose={() => setActiveSheet(null)}
+        />
+      )}
+      {activeSheet === 'bulkLocation' && (
+        <BulkLocationSheet
+          items={items}
+          onClose={() => setActiveSheet(null)}
+        />
+      )}
+      {activeSheet === 'bulkAdjust' && (
+        <BulkAdjustSheet
+          items={items}
+          onClose={() => setActiveSheet(null)}
+          onSuccess={fetchData}
         />
       )}
     </div>
