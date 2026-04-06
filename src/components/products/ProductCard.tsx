@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, memo, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
-  Box, Truck, Trash2, Plus,
+  Box, Truck, Trash2,
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations } from '../../lib/jarvis'
