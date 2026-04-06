@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Search, X, Loader2, CheckCircle, MapPin, Plus } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Search, X, Loader2, CheckCircle, MapPin, Plus, ScanBarcode } from 'lucide-react'
 import type { StockItem, StockLocation } from '../../lib/jarvis'
 import { getLocations } from '../../lib/jarvis'
 import { bulkAssignLocation, createLocation } from '../../lib/jarvisActions'
+import BarcodeScanner from '../BarcodeScanner'
 
 interface BulkLocationSheetProps {
   items: StockItem[]
@@ -16,8 +17,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   const [locLoading, setLocLoading] = useState(true)
   const [selectedLocId, setSelectedLocId] = useState<number | ''>('')
 
-  // Create new location fields
-  const [showNewLoc, setShowNewLoc] = useState(false)
+  // Create new location fields — always visible
   const [newAisle, setNewAisle] = useState('')
   const [newBay, setNewBay] = useState('')
   const [newLocDesc, setNewLocDesc] = useState('')
@@ -27,7 +27,16 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   const [result, setResult] = useState<{ ok: number; failed: number; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const [scannerOpen, setScannerOpen] = useState(false)
+
   const addedCodes = useMemo(() => new Set(entries.map(e => e.itemCode)), [entries])
+
+  // Build barcode → item lookup for scanner
+  const barcodeMap = useMemo(() => {
+    const map = new Map<string, StockItem>()
+    for (const i of items) if (i.barcode) map.set(i.barcode, i)
+    return map
+  }, [items])
 
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
@@ -50,6 +59,16 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
       .finally(() => setLocLoading(false))
   }, [])
 
+  const handleScan = useCallback((code: string) => {
+    setScannerOpen(false)
+    const item = barcodeMap.get(code)
+    if (item && !addedCodes.has(item.itemCode)) {
+      setEntries(prev => [...prev, item])
+    } else if (!item) {
+      setSearch(code)
+    }
+  }, [barcodeMap, addedCodes])
+
   async function handleCreateLocation() {
     if (!newAisle.trim() || !newBay.trim()) return
     setCreateBusy(true)
@@ -61,7 +80,6 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         setLocations(updated.filter(l => l.active))
         setSelectedLocId(res.id)
         setNewAisle(''); setNewBay(''); setNewLocDesc('')
-        setShowNewLoc(false)
       } else {
         setError(res.message ?? 'Failed to create location')
       }
@@ -110,7 +128,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
           <button onClick={onClose} className="text-gray-400 text-lg leading-none">✕</button>
         </div>
 
-        {/* Location selection */}
+        {/* Location selection + creation */}
         <div className="px-4 pt-3 pb-3 border-b border-gray-100 shrink-0 space-y-2.5">
           {locLoading ? (
             <div className="flex items-center gap-2 text-xs text-gray-400">
@@ -118,27 +136,22 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
             </div>
           ) : (
             <>
-              <div className="flex gap-2 items-center">
+              {/* Select existing */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-500 uppercase">Target Location</label>
                 <select
                   value={selectedLocId}
                   onChange={e => setSelectedLocId(e.target.value ? Number(e.target.value) : '')}
                   disabled={processing}
-                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
                 >
-                  <option value="">Select target location...</option>
+                  <option value="">Select existing location...</option>
                   {locations.map(l => (
                     <option key={l.id} value={l.id}>
                       Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
                     </option>
                   ))}
                 </select>
-                <button
-                  onClick={() => setShowNewLoc(p => !p)}
-                  disabled={processing}
-                  className="px-3 py-2 bg-blue-50 text-blue-600 text-xs font-semibold rounded-lg hover:bg-blue-100 disabled:opacity-50"
-                >
-                  <Plus size={14} />
-                </button>
               </div>
 
               {selectedLoc && (
@@ -148,62 +161,74 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                 </p>
               )}
 
-              {showNewLoc && (
-                <div className="bg-blue-50 rounded-lg p-3 space-y-2">
-                  <p className="text-[10px] font-semibold text-blue-500 uppercase">Create New Location</p>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={newAisle}
-                      onChange={e => setNewAisle(e.target.value)}
-                      placeholder="Aisle"
-                      className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                    />
-                    <input
-                      type="text"
-                      value={newBay}
-                      onChange={e => setNewBay(e.target.value)}
-                      placeholder="Bay"
-                      className="w-16 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                    />
-                    <input
-                      type="text"
-                      value={newLocDesc}
-                      onChange={e => setNewLocDesc(e.target.value)}
-                      placeholder="Description"
-                      className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                    />
-                    <button
-                      onClick={handleCreateLocation}
-                      disabled={createBusy || !newAisle.trim() || !newBay.trim()}
-                      className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
-                    >
-                      {createBusy ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
-                    </button>
-                  </div>
+              {/* Or create new — always visible */}
+              <div className="bg-blue-50 rounded-lg p-3 space-y-2">
+                <p className="text-[10px] font-semibold text-blue-500 uppercase flex items-center gap-1"><Plus size={10} /> Or Create New Location</p>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newAisle}
+                    onChange={e => setNewAisle(e.target.value)}
+                    placeholder="Aisle"
+                    disabled={processing}
+                    className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                  />
+                  <input
+                    type="text"
+                    value={newBay}
+                    onChange={e => setNewBay(e.target.value)}
+                    placeholder="Bay"
+                    disabled={processing}
+                    className="w-16 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                  />
+                  <input
+                    type="text"
+                    value={newLocDesc}
+                    onChange={e => setNewLocDesc(e.target.value)}
+                    placeholder="Description"
+                    disabled={processing}
+                    className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                  />
+                  <button
+                    onClick={handleCreateLocation}
+                    disabled={createBusy || !newAisle.trim() || !newBay.trim() || processing}
+                    className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+                  >
+                    {createBusy ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
+                  </button>
                 </div>
-              )}
+              </div>
             </>
           )}
         </div>
 
-        {/* Search */}
+        {/* Search + Scan */}
         <div className="px-4 pt-3 pb-2 shrink-0">
-          <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search products to add..."
-              className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search or scan products..."
+                className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+                disabled={processing}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setScannerOpen(true)}
               disabled={processing}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
-                <X size={14} />
-              </button>
-            )}
+              className="px-2.5 py-2 border border-gray-200 rounded-lg text-gray-500 hover:text-violet-600 hover:border-violet-300 disabled:opacity-50"
+              title="Scan barcode"
+            >
+              <ScanBarcode size={18} />
+            </button>
           </div>
           {searchResults.length > 0 && (
             <div className="mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-36 overflow-auto">
@@ -215,7 +240,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                 >
                   <div className="min-w-0">
                     <p className="text-sm text-gray-800 truncate">{item.description}</p>
-                    <p className="text-xs text-gray-400">{item.itemCode}</p>
+                    <p className="text-xs text-gray-400">{item.barcode ?? item.itemCode}</p>
                   </div>
                   <span className="text-xs text-violet-600 font-medium shrink-0 ml-2">Add</span>
                 </button>
@@ -228,15 +253,16 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         <div className="flex-1 overflow-auto px-4 pb-2">
           {entries.length === 0 ? (
             <div className="text-center py-6 text-sm text-gray-400">
-              Search and add products to assign location
+              Search or scan barcodes to add products
             </div>
           ) : (
             <div className="space-y-1.5">
+              <p className="text-xs text-gray-400 px-1">{entries.length} item{entries.length !== 1 ? 's' : ''} selected</p>
               {entries.map(entry => (
                 <div key={entry.itemCode} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-gray-800 truncate">{entry.description}</p>
-                    <p className="text-xs text-gray-400">{entry.itemCode}</p>
+                    <p className="text-xs text-gray-400">{entry.barcode ?? entry.itemCode}</p>
                   </div>
                   {!processing && !result && (
                     <button onClick={() => setEntries(prev => prev.filter(e => e.itemCode !== entry.itemCode))} className="text-gray-400 hover:text-red-500 shrink-0 ml-2">
@@ -278,6 +304,8 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
           {error && <p className="text-xs text-red-600 font-medium text-center mt-2">{error}</p>}
         </div>
       </div>
+
+      <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
     </div>
   )
 }

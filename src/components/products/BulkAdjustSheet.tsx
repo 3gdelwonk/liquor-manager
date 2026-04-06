@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
-import { Search, X, Loader2, CheckCircle, AlertCircle, Package } from 'lucide-react'
+import { useState, useMemo, useCallback } from 'react'
+import { Search, X, Loader2, CheckCircle, AlertCircle, Package, ScanBarcode } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { adjustStock } from '../../lib/jarvisActions'
 import { REASON_CODES } from './ProductCard'
+import BarcodeScanner from '../BarcodeScanner'
 
 interface BulkAdjustSheetProps {
   items: StockItem[]
@@ -24,8 +25,26 @@ export default function BulkAdjustSheet({ items, onClose, onSuccess }: BulkAdjus
   const [customReason, setCustomReason] = useState('')
   const [processing, setProcessing] = useState(false)
   const [result, setResult] = useState<{ ok: number; failed: number } | null>(null)
+  const [scannerOpen, setScannerOpen] = useState(false)
 
   const addedCodes = useMemo(() => new Set(entries.map(e => e.item.itemCode)), [entries])
+
+  // Build barcode → item lookup for scanner
+  const barcodeMap = useMemo(() => {
+    const map = new Map<string, StockItem>()
+    for (const i of items) if (i.barcode) map.set(i.barcode, i)
+    return map
+  }, [items])
+
+  const handleScan = useCallback((code: string) => {
+    setScannerOpen(false)
+    const item = barcodeMap.get(code)
+    if (item && !addedCodes.has(item.itemCode)) {
+      setEntries(prev => [...prev, { item, newQty: '', status: 'pending' as const }])
+    } else if (!item) {
+      setSearch(code)
+    }
+  }, [barcodeMap, addedCodes])
 
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
@@ -156,21 +175,31 @@ export default function BulkAdjustSheet({ items, onClose, onSuccess }: BulkAdjus
 
         {/* Search */}
         <div className="px-4 pt-3 pb-2 shrink-0">
-          <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search products to add..."
-              className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search or scan products..."
+                className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+                disabled={processing}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setScannerOpen(true)}
               disabled={processing}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
-                <X size={14} />
-              </button>
-            )}
+              className="px-2.5 py-2 border border-gray-200 rounded-lg text-gray-500 hover:text-violet-600 hover:border-violet-300 disabled:opacity-50"
+              title="Scan barcode"
+            >
+              <ScanBarcode size={18} />
+            </button>
           </div>
           {searchResults.length > 0 && (
             <div className="mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-36 overflow-auto">
@@ -280,6 +309,8 @@ export default function BulkAdjustSheet({ items, onClose, onSuccess }: BulkAdjus
           )}
         </div>
       </div>
+
+      <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
     </div>
   )
 }
