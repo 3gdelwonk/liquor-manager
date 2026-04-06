@@ -246,7 +246,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
       ]
 
       for (const level of levels) {
-        if (level.id) {
+        if (level.id && level.id !== -1) {
           parentId = Number(level.id)
           finalId = parentId
         } else if (level.name.trim() && level.code.trim()) {
@@ -644,7 +644,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       newName={zoneName}
                       newCode={zoneCode}
                       onSelectId={(id) => setZone(id, '', '')}
-                      onNewName={(v) => { _setZoneName(v); locationMemory.zoneName = v; if (zoneId) { _setZoneId(''); locationMemory.zoneId = '' } }}
+                      onNewName={(v) => { _setZoneName(v); locationMemory.zoneName = v }}
                       onNewCode={(v) => { _setZoneCode(v); locationMemory.zoneCode = v }}
                       busy={locBusy}
                     />
@@ -655,7 +655,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       newName={aisleName}
                       newCode={aisleCode}
                       onSelectId={(id) => setAisle(id, '', '')}
-                      onNewName={(v) => { _setAisleName(v); locationMemory.aisleName = v; if (aisleId) { _setAisleId(''); locationMemory.aisleId = '' } }}
+                      onNewName={(v) => { _setAisleName(v); locationMemory.aisleName = v }}
                       onNewCode={(v) => { _setAisleCode(v); locationMemory.aisleCode = v }}
                       busy={locBusy}
                     />
@@ -666,7 +666,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       newName={bayName}
                       newCode={bayCode}
                       onSelectId={(id) => setBay(id, '', '')}
-                      onNewName={(v) => { _setBayName(v); locationMemory.bayName = v; if (bayId) { _setBayId(''); locationMemory.bayId = '' } }}
+                      onNewName={(v) => { _setBayName(v); locationMemory.bayName = v }}
                       onNewCode={(v) => { _setBayCode(v); locationMemory.bayCode = v }}
                       busy={locBusy}
                     />
@@ -677,13 +677,13 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       newName={shelfName}
                       newCode={shelfCode}
                       onSelectId={(id) => setShelf(id, '', '')}
-                      onNewName={(v) => { _setShelfName(v); locationMemory.shelfName = v; if (shelfId) { _setShelfId(''); locationMemory.shelfId = '' } }}
+                      onNewName={(v) => { _setShelfName(v); locationMemory.shelfName = v }}
                       onNewCode={(v) => { _setShelfCode(v); locationMemory.shelfCode = v }}
                       busy={locBusy}
                     />
                     <button
                       onClick={(e) => { e.stopPropagation(); handleAssignHierarchy() }}
-                      disabled={locBusy || (!zoneId && !zoneName.trim() && !aisleId && !aisleName.trim() && !bayId && !bayName.trim() && !shelfId && !shelfName.trim())}
+                      disabled={locBusy || ((!zoneId || zoneId === -1) && !zoneName.trim() && (!aisleId || aisleId === -1) && !aisleName.trim() && (!bayId || bayId === -1) && !bayName.trim() && (!shelfId || shelfId === -1) && !shelfName.trim())}
                       className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
                       {locBusy ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}
@@ -921,22 +921,22 @@ function LocationLevelRow({ label, options, selectedId, newName, newCode, onSele
   onNewCode: (v: string) => void
   busy: boolean
 }) {
-  const isNew = !selectedId && (newName || newCode)
-  const showNewInputs = selectedId === -1 || (isNew && newName)
+  const showNewInputs = selectedId === -1
 
   return (
     <div className="space-y-1">
       <label className="text-[10px] font-semibold text-blue-400 uppercase">{label}</label>
       <div className="flex gap-1.5">
         <select
-          value={selectedId === -1 ? -1 : selectedId || (newName ? -1 : '')}
+          value={selectedId || ''}
           onChange={e => {
             const v = Number(e.target.value)
             if (v === -1) {
-              onSelectId('')
-              // keep existing newName/newCode
-            } else if (v) {
+              onSelectId(-1)
+            } else if (v > 0) {
               onSelectId(v)
+              onNewName('')
+              onNewCode('')
             } else {
               onSelectId('')
               onNewName('')
