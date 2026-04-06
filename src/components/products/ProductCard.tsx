@@ -175,6 +175,8 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
   const status = statusLabel(item.onHand, item.reorderLevel)
   const badgeClass = DEPT_COLORS[item.department] ?? 'bg-gray-100 text-gray-600'
+  // When on promo, item.sellPrice may reflect the promo price — use promo.normalPrice as the true normal
+  const normalPrice = promo ? promo.normalPrice : item.sellPrice
 
   // Lazy-load detail on expand (fixed: no orderInfo/posStatus in deps)
   useEffect(() => {
@@ -360,7 +362,8 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
           {/* Price + QOH row */}
           <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-gray-900">${fmtMoney(item.sellPrice)}</span>
+            <span className="text-sm font-semibold text-gray-900">${fmtMoney(normalPrice)}</span>
+            {promo && <span className="text-xs font-medium text-amber-600">${fmtMoney(promo.promoPrice)}</span>}
             {item.avgCost > 0 && <span className="text-xs text-gray-400">cost ${fmtMoney(item.avgCost)}</span>}
             <div className="ml-auto flex items-center gap-1.5">
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${statusColor(status)}`}>{status}</span>
@@ -404,12 +407,12 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                   </button>
                   <MetricCell
                     label="Price"
-                    value={`$${fmtMoney(item.sellPrice)}`}
+                    value={`$${fmtMoney(normalPrice)}`}
                     sub={promo ? <span className="text-[9px] font-medium text-amber-600">Promo ${fmtMoney(promo.promoPrice)}</span> : undefined}
                   />
                   <MetricCell label="Cost" value={item.avgCost > 0 ? `$${fmtMoney(item.avgCost)}` : '—'} />
                   {(() => {
-                    const m = item.sellPrice > 0 && item.avgCost > 0 ? ((item.sellPrice - item.avgCost) / item.sellPrice * 100) : null
+                    const m = normalPrice > 0 && item.avgCost > 0 ? ((normalPrice - item.avgCost) / normalPrice * 100) : null
                     return (
                       <MetricCell
                         label="Margin"
