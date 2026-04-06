@@ -63,6 +63,7 @@ export default function ProductsView() {
   const { resolveCode } = useProductCodeLookup()
   const searchTimer = useRef<ReturnType<typeof setTimeout>>()
   const searchedItems = useRef<Map<string, StockItem>>(new Map()) // persists scanned/searched items across refreshes
+  const [serverMatchCodes, setServerMatchCodes] = useState<Set<string>>(new Set()) // itemCodes the server matched for the current search
 
   // Build promo lookup: itemCode → LivePromotion
   const promoMap = useMemo(() => {
@@ -109,42 +110,12 @@ export default function ProductsView() {
     return () => clearInterval(iv)
   }, [fetchData])
 
-  // Debounced server search — returns ALL departments so scanned items always persist
-  const handleSearch = useCallback((query: string) => {
-    setSearch(query)
-    if (searchTimer.current) clearTimeout(searchTimer.current)
-    if (!query.trim()) return // client-side filter handles empty
-    searchTimer.current = setTimeout(async () => {
-      try {
-        const res = await searchItems(query, 100)
-        if (res.items.length > 0) {
-          // Track non-liquor items so they survive fetchData refreshes
-          for (const item of res.items) {
-            if (!LIQUOR_DEPT_NAMES.has(item.department)) {
-              searchedItems.current.set(item.itemCode, item)
-            }
-          }
-          setItems(prev => {
-            const existing = new Map(prev.map(i => [i.itemCode, i]))
-            for (const item of res.items) existing.set(item.itemCode, item)
-            return Array.from(existing.values())
-          })
-        }
-      } catch { /* keep existing data on search failure */ }
-    }, 300)
-  }, [])
-
-  // Handle barcode scan — reset filters and do immediate server lookup
-  const handleScan = useCallback(async (code: string) => {
-    setScannerOpen(false)
-    setSegment('all')
-    setDeptFilter('all')
-    const resolved = resolveCode(code)
-    setSearch(resolved)
-    // Immediate server search (no debounce) for barcode scans
+  // Server search helper — merges results into items and tracks matched codes
+  const runServerSearch = useCallback(async (query: string) => {
     try {
-      const res = await searchItems(resolved, 20)
+      const res = await searchItems(query, 100)
       if (res.items.length > 0) {
+        setServerMatchCodes(new Set(res.items.map(i => i.itemCode)))
         for (const item of res.items) {
           if (!LIQUOR_DEPT_NAMES.has(item.department)) {
             searchedItems.current.set(item.itemCode, item)
@@ -156,8 +127,37 @@ export default function ProductsView() {
           return Array.from(existing.values())
         })
       }
-    } catch { /* keep existing data */ }
-  }, [resolveCode])
+    } catch { /* keep existing data on search failure */ }
+  }, [])
+
+  // Search handler — immediate for barcode-like queries, debounced for text
+  const handleSearch = useCallback((query: string) => {
+    setSearch(query)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    if (!query.trim()) {
+      setServerMatchCodes(new Set())
+      return
+    }
+    const trimmed = query.trim()
+    const isBarcodeLike = /^\d{8,}$/.test(trimmed)
+    if (isBarcodeLike) {
+      // Barcode input — search immediately so the item never flickers away
+      runServerSearch(trimmed)
+    } else {
+      searchTimer.current = setTimeout(() => runServerSearch(trimmed), 300)
+    }
+  }, [runServerSearch])
+
+  // Handle barcode scan — reset filters and do immediate server lookup
+  const handleScan = useCallback(async (code: string) => {
+    setScannerOpen(false)
+    setSegment('all')
+    setDeptFilter('all')
+    const resolved = resolveCode(code)
+    setSearch(resolved)
+    // Immediate server search (no debounce) for barcode scans
+    await runServerSearch(resolved)
+  }, [resolveCode, runServerSearch])
 
   // Handle action from ProductCard
   function handleCardAction(item: StockItem, action: 'price' | 'promo' | 'createItem' | 'printLabel') {
@@ -205,6 +205,8 @@ export default function ProductsView() {
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter(i => {
+        // Server already validated this item matches the search — always show it
+        if (serverMatchCodes.has(i.itemCode)) return true
         const bc = i.barcode?.trim() ?? ''
         const oc = i.orderCode?.trim() ?? ''
         return (
@@ -239,7 +241,7 @@ export default function ProductsView() {
     })
 
     return list
-  }, [items, search, segment, deptFilter, sortKey, promoMap])
+  }, [items, search, segment, deptFilter, sortKey, promoMap, serverMatchCodes])
 
   // Department counts for filter badges
   const deptCounts = useMemo(() => {
@@ -248,6 +250,7 @@ export default function ProductsView() {
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       filtered = filtered.filter(i => {
+        if (serverMatchCodes.has(i.itemCode)) return true
         const bc = i.barcode?.trim() ?? ''
         const oc = i.orderCode?.trim() ?? ''
         return (
@@ -262,7 +265,7 @@ export default function ProductsView() {
     else if (segment === 'low') filtered = filtered.filter(i => i.onHand < i.reorderLevel)
     for (const i of filtered) counts[i.department] = (counts[i.department] ?? 0) + 1
     return counts
-  }, [items, search, segment, promoMap])
+  }, [items, search, segment, promoMap, serverMatchCodes])
 
   const totalFiltered = Object.values(deptCounts).reduce((s, c) => s + c, 0)
 
@@ -355,7 +358,7 @@ export default function ProductsView() {
           />
           {search && (
             <button
-              onClick={() => { setSearch(''); searchedItems.current.clear(); fetchData() }}
+              onClick={() => { setSearch(''); setServerMatchCodes(new Set()); searchedItems.current.clear(); fetchData() }}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
               <X size={14} />
