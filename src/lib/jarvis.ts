@@ -644,23 +644,40 @@ export async function getPosStatus(barcode: string): Promise<PosStatus> {
   return jarvisFetch<PosStatus>(`/api/pos/pos-status/${encodeURIComponent(barcode)}`);
 }
 
-// ── Stock Locations ──────────────────────────────────────────────────────────
+// ── Stock Locations (Hierarchical) ──────────────────────────────────────────
+
+export interface LocationType {
+  id: number;
+  name: string;        // "Zone", "Aisle", "Bay", "Row"
+  [key: string]: unknown;
+}
 
 export interface StockLocation {
   id: number;
-  aisle: string;
-  bay: string;
-  description?: string;
+  name: string;
+  shortCode: string;
+  typeId: number;
+  typeName?: string;   // resolved from type
+  parentId: number | null;
   active: boolean;
+  children?: StockLocation[];
   [key: string]: unknown;
 }
 
 export interface ItemLocation {
   locationId: number;
-  aisle: string;
-  bay: string;
-  description?: string;
+  name: string;
+  shortCode: string;
+  typeId: number;
+  typeName?: string;
+  parentId: number | null;
+  path?: string;       // "Zone > Aisle > Bay > Row"
   [key: string]: unknown;
+}
+
+export async function getLocationTypes(): Promise<LocationType[]> {
+  const raw = await jarvisFetch<LocationType[] | { types: LocationType[] }>('/api/pos/location-types');
+  return Array.isArray(raw) ? raw : raw.types;
 }
 
 export async function getLocations(): Promise<StockLocation[]> {
@@ -673,6 +690,13 @@ export async function getItemLocations(itemCode: string): Promise<ItemLocation[]
     `/api/pos/locations/item/${encodeURIComponent(itemCode)}`
   );
   return Array.isArray(raw) ? raw : raw.locations;
+}
+
+export async function getLocationItems(locationId: number): Promise<StockItem[]> {
+  const raw = await jarvisFetch<StockItem[] | { items: StockItem[] }>(
+    `/api/pos/locations/${locationId}/items`
+  );
+  return Array.isArray(raw) ? raw : raw.items;
 }
 
 // ── Department List ──────────────────────────────────────────────────────────

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { MapPin, Loader2, ArrowRight, Trash2, Plus, CheckCircle } from 'lucide-react'
 import type { StockItem, StockLocation, ItemLocation } from '../../lib/jarvis'
 import { getLocations, getItemLocations } from '../../lib/jarvis'
 import { assignItemLocation, removeItemLocation, moveItemLocation } from '../../lib/jarvisActions'
+import { flattenLocations, buildLocationTree, formatItemLocation, getTypeLabel } from '../../lib/locationUtils'
 
 interface StockLocationSheetProps {
   item: StockItem
@@ -18,6 +19,11 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const [selectedLocId, setSelectedLocId] = useState<number | ''>('')
   const [moveTargetId, setMoveTargetId] = useState<number | ''>('')
+
+  const flatLocs = useMemo(() => {
+    const tree = buildLocationTree(locations)
+    return flattenLocations(tree)
+  }, [locations])
 
   useEffect(() => {
     async function load() {
@@ -101,9 +107,10 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
     }
   }
 
-  const availableForAssign = locations.filter(
-    l => !itemLocations.some(il => il.locationId === l.id)
-  )
+  const availableForAssign = useMemo(() => {
+    const assigned = new Set(itemLocations.map(il => il.locationId))
+    return flatLocs.filter(l => !assigned.has(l.id))
+  }, [flatLocs, itemLocations])
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -131,16 +138,21 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
                 itemLocations.map(loc => (
                   <div key={loc.locationId} className="bg-gray-50 rounded-lg p-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <MapPin size={14} className="text-violet-500" />
-                        <span className="text-sm font-medium text-gray-800">
-                          Aisle {loc.aisle}, Bay {loc.bay}
-                        </span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <MapPin size={14} className="text-violet-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-sm font-medium text-gray-800 block truncate">
+                            {formatItemLocation(loc)}
+                          </span>
+                          {loc.typeName && (
+                            <span className="text-[10px] text-gray-400">{loc.typeName}</span>
+                          )}
+                        </div>
                       </div>
                       <button
                         onClick={() => handleRemove(loc)}
                         disabled={busy}
-                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
+                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 shrink-0"
                         title="Remove from location"
                       >
                         <Trash2 size={14} />
@@ -155,8 +167,8 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
                         className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-violet-300"
                       >
                         <option value="">Move to...</option>
-                        {locations.filter(l => l.id !== loc.locationId).map(l => (
-                          <option key={l.id} value={l.id}>Aisle {l.aisle}, Bay {l.bay}</option>
+                        {flatLocs.filter(l => l.id !== loc.locationId).map(l => (
+                          <option key={l.id} value={l.id}>{l.path} ({getTypeLabel(l.typeId, l.typeName)})</option>
                         ))}
                       </select>
                       <button
@@ -172,7 +184,7 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
               )}
             </div>
 
-            {/* Assign to new location */}
+            {/* Assign to location */}
             {availableForAssign.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-gray-500 uppercase">Assign to Location</p>
@@ -184,7 +196,7 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
                   >
                     <option value="">Select location...</option>
                     {availableForAssign.map(l => (
-                      <option key={l.id} value={l.id}>Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}</option>
+                      <option key={l.id} value={l.id}>{l.path} ({getTypeLabel(l.typeId, l.typeName)})</option>
                     ))}
                   </select>
                   <button

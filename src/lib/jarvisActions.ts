@@ -168,7 +168,31 @@ export async function togglePriceLock(
   return jarvisPut(`/api/pos/price-lock/${encodeURIComponent(barcode)}`, { locked })
 }
 
-// ── Stock Location Actions ───────────────────────────────────────────────────
+// ── Stock Location Actions (Hierarchical) ───────────────────────────────────
+
+export async function createLocation(
+  name: string,
+  shortCode: string,
+  typeId: number,
+  parentId?: number
+): Promise<{ success: boolean; id?: number; message?: string }> {
+  const body: Record<string, unknown> = { name, shortCode, typeId }
+  if (parentId) body.parentId = parentId
+  return jarvisPost('/api/pos/locations', body)
+}
+
+export async function updateLocation(
+  locationId: number,
+  updates: { name?: string; shortCode?: string; typeId?: number; parentId?: number }
+): Promise<{ success: boolean; message?: string }> {
+  return jarvisPut(`/api/pos/locations/${locationId}`, updates)
+}
+
+export async function deleteLocation(
+  locationId: number
+): Promise<{ success: boolean; message?: string }> {
+  return jarvisDelete(`/api/pos/locations/${locationId}`)
+}
 
 export async function assignItemLocation(
   locationId: number,
@@ -192,17 +216,23 @@ export async function moveItemLocation(
   return jarvisPut(`/api/pos/locations/${locationId}/move`, { itemCode, newLocationId })
 }
 
+export async function bulkMoveLocation(
+  locationId: number,
+  itemCodes: string[]
+): Promise<{ success: boolean; message?: string }> {
+  return jarvisPut(`/api/pos/locations/${locationId}/bulk-move`, { itemCodes })
+}
+
 export async function bulkAssignLocation(
   locationId: number,
   itemCodes: string[]
-): Promise<{ success: boolean; assigned: number; message?: string }> {
+): Promise<{ success: boolean; assigned?: number; message?: string }> {
   return jarvisPost(`/api/pos/locations/${locationId}/bulk-assign`, { itemCodes })
 }
 
-export async function createLocation(
-  aisle: string,
-  bay: string,
-  description?: string
-): Promise<{ success: boolean; id?: number; message?: string }> {
-  return jarvisPost('/api/pos/locations', { aisle, bay, description })
+export async function assignDepartmentToLocation(
+  locationId: number,
+  department: string
+): Promise<{ success: boolean; message?: string }> {
+  return jarvisPost(`/api/pos/locations/${locationId}/assign-department`, { department })
 }

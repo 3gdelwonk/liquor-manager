@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Search, X, Loader2, CheckCircle, MapPin, Plus, ScanBarcode } from 'lucide-react'
-import type { StockItem, StockLocation } from '../../lib/jarvis'
-import { getLocations } from '../../lib/jarvis'
+import type { StockItem, StockLocation, LocationType } from '../../lib/jarvis'
+import { getLocations, getLocationTypes } from '../../lib/jarvis'
 import { bulkAssignLocation, createLocation } from '../../lib/jarvisActions'
+import { flattenLocations, buildLocationTree, getTypeLabel } from '../../lib/locationUtils'
 import BarcodeScanner from '../BarcodeScanner'
 
 interface BulkLocationSheetProps {
@@ -14,13 +15,15 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   const [search, setSearch] = useState('')
   const [entries, setEntries] = useState<StockItem[]>([])
   const [locations, setLocations] = useState<StockLocation[]>([])
+  const [locationTypes, setLocationTypes] = useState<LocationType[]>([])
   const [locLoading, setLocLoading] = useState(true)
   const [selectedLocId, setSelectedLocId] = useState<number | ''>('')
 
-  // Create new location fields — always visible
-  const [newAisle, setNewAisle] = useState('')
-  const [newBay, setNewBay] = useState('')
-  const [newLocDesc, setNewLocDesc] = useState('')
+  // Create new location fields
+  const [newLocName, setNewLocName] = useState('')
+  const [newLocCode, setNewLocCode] = useState('')
+  const [newLocTypeId, setNewLocTypeId] = useState<number>(2)
+  const [newLocParentId, setNewLocParentId] = useState<number | ''>('')
   const [createBusy, setCreateBusy] = useState(false)
 
   const [processing, setProcessing] = useState(false)
@@ -38,6 +41,12 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     return map
   }, [items])
 
+  // Flatten locations for dropdown
+  const flatLocs = useMemo(() => {
+    const tree = buildLocationTree(locations)
+    return flattenLocations(tree)
+  }, [locations])
+
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
     const q = search.trim().toLowerCase()
@@ -53,8 +62,11 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   }, [search, items, addedCodes])
 
   useEffect(() => {
-    getLocations()
-      .then(all => setLocations(all.filter(l => l.active)))
+    Promise.all([getLocations(), getLocationTypes()])
+      .then(([all, types]) => {
+        setLocations(all.filter(l => l.active))
+        setLocationTypes(types)
+      })
       .catch(() => setError('Failed to load locations'))
       .finally(() => setLocLoading(false))
   }, [])
@@ -70,16 +82,21 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   }, [barcodeMap, addedCodes])
 
   async function handleCreateLocation() {
-    if (!newAisle.trim() || !newBay.trim()) return
+    if (!newLocName.trim() || !newLocCode.trim()) return
     setCreateBusy(true)
     setError(null)
     try {
-      const res = await createLocation(newAisle.trim(), newBay.trim(), newLocDesc.trim() || undefined)
+      const res = await createLocation(
+        newLocName.trim(),
+        newLocCode.trim(),
+        newLocTypeId,
+        newLocParentId ? Number(newLocParentId) : undefined,
+      )
       if (res.success && res.id) {
         const updated = await getLocations()
         setLocations(updated.filter(l => l.active))
         setSelectedLocId(res.id)
-        setNewAisle(''); setNewBay(''); setNewLocDesc('')
+        setNewLocName(''); setNewLocCode(''); setNewLocParentId('')
       } else {
         setError(res.message ?? 'Failed to create location')
       }
@@ -116,7 +133,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     }
   }
 
-  const selectedLoc = locations.find(l => l.id === selectedLocId)
+  const selectedLoc = flatLocs.find(l => l.id === selectedLocId)
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -145,10 +162,10 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                   disabled={processing}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
                 >
-                  <option value="">Select existing location...</option>
-                  {locations.map(l => (
+                  <option value="">Select location...</option>
+                  {flatLocs.map(l => (
                     <option key={l.id} value={l.id}>
-                      Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
+                      {l.path} ({getTypeLabel(l.typeId, l.typeName)})
                     </option>
                   ))}
                 </select>
@@ -156,8 +173,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
 
               {selectedLoc && (
                 <p className="text-xs text-blue-600 font-medium px-1">
-                  <MapPin size={10} className="inline" /> Aisle {selectedLoc.aisle}, Bay {selectedLoc.bay}
-                  {selectedLoc.description && ` — ${selectedLoc.description}`}
+                  <MapPin size={10} className="inline" /> {selectedLoc.path}
                 </p>
               )}
 
@@ -165,33 +181,55 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
               <div className="bg-blue-50 rounded-lg p-3 space-y-2">
                 <p className="text-[10px] font-semibold text-blue-500 uppercase flex items-center gap-1"><Plus size={10} /> Or Create New Location</p>
                 <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={newAisle}
-                    onChange={e => setNewAisle(e.target.value)}
-                    placeholder="Aisle"
+                  <select
+                    value={newLocTypeId}
+                    onChange={e => setNewLocTypeId(Number(e.target.value))}
                     disabled={processing}
-                    className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                  />
+                    className="w-20 border border-blue-200 rounded-lg px-1.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                  >
+                    {locationTypes.length > 0 ? locationTypes.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    )) : (
+                      <>
+                        <option value={4}>Zone</option>
+                        <option value={1}>Aisle</option>
+                        <option value={2}>Bay</option>
+                        <option value={3}>Row</option>
+                      </>
+                    )}
+                  </select>
                   <input
                     type="text"
-                    value={newBay}
-                    onChange={e => setNewBay(e.target.value)}
-                    placeholder="Bay"
-                    disabled={processing}
-                    className="w-16 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                  />
-                  <input
-                    type="text"
-                    value={newLocDesc}
-                    onChange={e => setNewLocDesc(e.target.value)}
-                    placeholder="Description"
+                    value={newLocName}
+                    onChange={e => setNewLocName(e.target.value)}
+                    placeholder="Name"
                     disabled={processing}
                     className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
                   />
+                  <input
+                    type="text"
+                    value={newLocCode}
+                    onChange={e => setNewLocCode(e.target.value)}
+                    placeholder="Short code"
+                    disabled={processing}
+                    className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                  />
+                </div>
+                <div className="flex gap-1.5">
+                  <select
+                    value={newLocParentId}
+                    onChange={e => setNewLocParentId(e.target.value ? Number(e.target.value) : '')}
+                    disabled={processing}
+                    className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                  >
+                    <option value="">No parent (top level)</option>
+                    {flatLocs.map(l => (
+                      <option key={l.id} value={l.id}>{l.path}</option>
+                    ))}
+                  </select>
                   <button
                     onClick={handleCreateLocation}
-                    disabled={createBusy || !newAisle.trim() || !newBay.trim() || processing}
+                    disabled={createBusy || !newLocName.trim() || !newLocCode.trim() || processing}
                     className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
                   >
                     {createBusy ? <Loader2 size={12} className="animate-spin" /> : 'Create'}

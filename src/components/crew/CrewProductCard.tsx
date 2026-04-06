@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { MapPin, Printer, CalendarClock, Package, ChevronDown, Loader2, CheckCircle, X, AlertTriangle } from 'lucide-react'
 import type { StockItem, LivePromotion, ItemLocation } from '../../lib/jarvis'
 import { getItemLocations } from '../../lib/jarvis'
+import { formatItemLocation } from '../../lib/locationUtils'
 import { adjustStock } from '../../lib/jarvisActions'
 import { db, type ExpiryRecord } from '../../lib/db'
 import ProductImage from '../ProductImage'
@@ -151,7 +152,7 @@ export default function CrewProductCard({ item, promo, onPrintLabel }: CrewProdu
               {locations.length > 0
                 ? locations.map(l => (
                     <span key={l.locationId} className="inline-block mr-2">
-                      Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
+                      {formatItemLocation(l)}
                     </span>
                   ))
                 : <span className="text-gray-400">No location set</span>

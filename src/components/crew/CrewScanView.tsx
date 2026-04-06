@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { ScanBarcode, Search, Loader2, Package, MapPin, CalendarClock, Printer, X, AlertTriangle } from 'lucide-react'
 import type { StockItem, LivePromotion, ItemLocation } from '../../lib/jarvis'
 import { searchItems, getItemLocations, getPromotions } from '../../lib/jarvis'
+import { formatItemLocation } from '../../lib/locationUtils'
 import { db, type ExpiryRecord } from '../../lib/db'
 import ProductImage from '../ProductImage'
 import BarcodeScanner from '../BarcodeScanner'
@@ -205,7 +206,7 @@ export default function CrewScanView() {
                   {locations.length > 0
                     ? locations.map(l => (
                         <span key={l.locationId} className="block">
-                          Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
+                          {formatItemLocation(l)}
                         </span>
                       ))
                     : <span className="text-gray-400">No location set</span>

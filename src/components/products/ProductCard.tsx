@@ -4,9 +4,10 @@ import {
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
   Box, Truck, Trash2, Plus,
 } from 'lucide-react'
-import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation } from '../../lib/jarvis'
-import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations } from '../../lib/jarvis'
+import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, LocationType } from '../../lib/jarvis'
+import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getLocationTypes } from '../../lib/jarvis'
 import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation } from '../../lib/jarvisActions'
+import { flattenLocations, buildLocationTree, formatItemLocation, getTypeLabel } from '../../lib/locationUtils'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 
@@ -106,12 +107,14 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   // Location inline
   const [showLocationPanel, setShowLocationPanel] = useState(false)
   const [allLocations, setAllLocations] = useState<StockLocation[]>([])
+  const [locationTypes, setLocationTypes] = useState<LocationType[]>([])
   const [itemLocations, setItemLocations] = useState<ItemLocation[]>([])
   const [locLoading, setLocLoading] = useState(false)
   const [locBusy, setLocBusy] = useState(false)
-  const [newAisle, setNewAisle] = useState('')
-  const [newBay, setNewBay] = useState('')
-  const [newLocDesc, setNewLocDesc] = useState('')
+  const [newLocName, setNewLocName] = useState('')
+  const [newLocCode, setNewLocCode] = useState('')
+  const [newLocTypeId, setNewLocTypeId] = useState<number>(2) // default Bay
+  const [newLocParentId, setNewLocParentId] = useState<number | ''>('')
   const [selectedLocId, setSelectedLocId] = useState<number | ''>('')
   const [locMsg, setLocMsg] = useState<string | null>(null)
 
@@ -152,18 +155,27 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }).finally(() => { if (mounted.current) setDetailLoading(false) })
   }, [expanded, item.itemCode, item.barcode])
 
-  // Memoize available locations for assignment
+  // Flatten hierarchical locations for dropdown
+  const flatLocs = useMemo(() => {
+    const tree = buildLocationTree(allLocations)
+    return flattenLocations(tree)
+  }, [allLocations])
+
   const availableLocations = useMemo(() => {
     const assigned = new Set(itemLocations.map(il => il.locationId))
-    return allLocations.filter(l => !assigned.has(l.id))
-  }, [allLocations, itemLocations])
+    return flatLocs.filter(l => !assigned.has(l.id))
+  }, [flatLocs, itemLocations])
 
-  // Load all locations when panel opens
+  // Load all locations + types when panel opens
   useEffect(() => {
     if (!showLocationPanel) return
     setLocLoading(true)
-    getLocations()
-      .then(all => { if (mounted.current) setAllLocations(all.filter(l => l.active)) })
+    Promise.all([getLocations(), getLocationTypes()])
+      .then(([all, types]) => {
+        if (!mounted.current) return
+        setAllLocations(all.filter(l => l.active))
+        setLocationTypes(types)
+      })
       .catch(() => { if (mounted.current) flashLocMsg('Failed to load locations') })
       .finally(() => { if (mounted.current) setLocLoading(false) })
   }, [showLocationPanel])
@@ -189,10 +201,15 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   }
 
   async function handleCreateAndAssign() {
-    if (!newAisle.trim() || !newBay.trim()) return
+    if (!newLocName.trim() || !newLocCode.trim()) return
     setLocBusy(true)
     try {
-      const res = await createLocation(newAisle.trim(), newBay.trim(), newLocDesc.trim() || undefined)
+      const res = await createLocation(
+        newLocName.trim(),
+        newLocCode.trim(),
+        newLocTypeId,
+        newLocParentId ? Number(newLocParentId) : undefined,
+      )
       if (!mounted.current) return
       if (res.success && res.id) {
         await assignItemLocation(res.id, item.itemCode)
@@ -202,7 +219,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
         if (!mounted.current) return
         setAllLocations(all.filter(l => l.active))
         setItemLocations(curr)
-        setNewAisle(''); setNewBay(''); setNewLocDesc('')
+        setNewLocName(''); setNewLocCode(''); setNewLocParentId('')
       } else {
         flashLocMsg(res.message ?? 'Failed to create location')
       }
@@ -373,7 +390,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                 <MapPin size={10} className="text-blue-500 shrink-0" />
                 {itemLocations.length > 0 ? (
                   <span className="text-gray-600">
-                    {itemLocations.map(l => `Aisle ${l.aisle}, Bay ${l.bay}`).join(' · ')}
+                    {itemLocations.map(l => formatItemLocation(l)).join(' · ')}
                   </span>
                 ) : (
                   <span className="text-gray-400 italic">No location set — tap to assign</span>
@@ -475,14 +492,18 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       <p className="text-[10px] font-semibold text-blue-500 uppercase">Current</p>
                       {itemLocations.map(loc => (
                         <div key={loc.locationId} className="flex items-center justify-between bg-white rounded-lg px-2.5 py-1.5">
-                          <span className="text-xs font-medium text-gray-700">
-                            Aisle {loc.aisle}, Bay {loc.bay}
-                            {loc.description && <span className="text-gray-400"> — {loc.description}</span>}
-                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-medium text-gray-700 block truncate">
+                              {formatItemLocation(loc)}
+                            </span>
+                            {loc.typeName && (
+                              <span className="text-[10px] text-gray-400">{loc.typeName}</span>
+                            )}
+                          </div>
                           <button
                             onClick={(e) => { e.stopPropagation(); handleRemoveLocation(loc) }}
                             disabled={locBusy}
-                            className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50"
+                            className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50 shrink-0"
                           >
                             <Trash2 size={12} />
                           </button>
@@ -500,10 +521,10 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                         onClick={e => e.stopPropagation()}
                         className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
                       >
-                        <option value="">Assign existing...</option>
+                        <option value="">Assign to location...</option>
                         {availableLocations.map(l => (
                           <option key={l.id} value={l.id}>
-                            Aisle {l.aisle}, Bay {l.bay}{l.description ? ` — ${l.description}` : ''}
+                            {l.path}
                           </option>
                         ))}
                       </select>
@@ -521,33 +542,55 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                   <div className="space-y-1.5">
                     <p className="text-[10px] font-semibold text-blue-500 uppercase flex items-center gap-1"><Plus size={10} /> New Location</p>
                     <div className="flex gap-1.5">
+                      <select
+                        value={newLocTypeId}
+                        onChange={e => setNewLocTypeId(Number(e.target.value))}
+                        onClick={e => e.stopPropagation()}
+                        className="w-20 border border-blue-200 rounded-lg px-1.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                      >
+                        {locationTypes.length > 0 ? locationTypes.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        )) : (
+                          <>
+                            <option value={4}>Zone</option>
+                            <option value={1}>Aisle</option>
+                            <option value={2}>Bay</option>
+                            <option value={3}>Row</option>
+                          </>
+                        )}
+                      </select>
                       <input
                         type="text"
-                        value={newAisle}
-                        onChange={e => setNewAisle(e.target.value)}
+                        value={newLocName}
+                        onChange={e => setNewLocName(e.target.value)}
                         onClick={e => e.stopPropagation()}
-                        placeholder="Aisle"
-                        className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                      />
-                      <input
-                        type="text"
-                        value={newBay}
-                        onChange={e => setNewBay(e.target.value)}
-                        onClick={e => e.stopPropagation()}
-                        placeholder="Bay"
-                        className="w-16 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                      />
-                      <input
-                        type="text"
-                        value={newLocDesc}
-                        onChange={e => setNewLocDesc(e.target.value)}
-                        onClick={e => e.stopPropagation()}
-                        placeholder="Description (optional)"
+                        placeholder="Name"
                         className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
                       />
+                      <input
+                        type="text"
+                        value={newLocCode}
+                        onChange={e => setNewLocCode(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        placeholder="Short code"
+                        className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                      />
+                    </div>
+                    <div className="flex gap-1.5">
+                      <select
+                        value={newLocParentId}
+                        onChange={e => setNewLocParentId(e.target.value ? Number(e.target.value) : '')}
+                        onClick={e => e.stopPropagation()}
+                        className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
+                      >
+                        <option value="">No parent (top level)</option>
+                        {flatLocs.map(l => (
+                          <option key={l.id} value={l.id}>{l.path} ({getTypeLabel(l.typeId, l.typeName)})</option>
+                        ))}
+                      </select>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleCreateAndAssign() }}
-                        disabled={locBusy || !newAisle.trim() || !newBay.trim()}
+                        disabled={locBusy || !newLocName.trim() || !newLocCode.trim()}
                         className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
                       >
                         {locBusy ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
