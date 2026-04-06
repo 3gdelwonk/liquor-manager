@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Printer, Loader2, CheckCircle, Hash } from 'lucide-react'
+import { Printer, Loader2, CheckCircle, Hash, Zap, ListPlus } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { getPrinters, getLabelStyles, type Printer as PrinterType, type LabelStyle } from '../../lib/jarvis'
-import { printLabel } from '../../lib/jarvisActions'
+import { printLabel, generateLabelQueue } from '../../lib/jarvisActions'
 
 interface PrintLabelSheetProps {
   item: StockItem
@@ -30,7 +30,6 @@ export default function PrintLabelSheet({ item, onClose }: PrintLabelSheetProps)
         const labelPrinters = printerList.filter(p => p.isLabel)
         setPrinters(labelPrinters)
         setStyles(styleList)
-        // Default to first label printer + its default style
         const first = labelPrinters[0]
         if (first) {
           setSelectedPrinter(first.id)
@@ -41,13 +40,11 @@ export default function PrintLabelSheet({ item, onClose }: PrintLabelSheetProps)
       .finally(() => setLoading(false))
   }, [])
 
-  // Filter styles to those matching the selected printer
   const availableStyles = useMemo(() =>
     styles.filter(s => s.printerId === selectedPrinter),
     [styles, selectedPrinter]
   )
 
-  // When printer changes, auto-select its default style
   function handlePrinterChange(printerId: number) {
     setSelectedPrinter(printerId)
     const printer = printers.find(p => p.id === printerId)
@@ -56,21 +53,34 @@ export default function PrintLabelSheet({ item, onClose }: PrintLabelSheetProps)
     setSelectedStyle(defaultStyle ?? printerStyles[0]?.id ?? null)
   }
 
-  async function handlePrint() {
+  async function handlePrint(immediate: boolean) {
     if (!item.barcode || !selectedPrinter) return
     setBusy(true)
     setError(null)
     setResult(null)
     try {
+      // Step 1: Queue the label
       const res = await printLabel(item.barcode, {
         printerId: selectedPrinter,
-        qty,
+        count: qty,
         styleId: selectedStyle ?? undefined,
       })
-      if (res.success || res.ok) {
-        setResult(res.message ?? `${res.labelCount ?? qty} label(s) queued`)
+      if (!(res.success || res.ok)) {
+        setError(res.message ?? 'Failed to queue label')
+        return
+      }
+
+      if (immediate) {
+        // Step 2: Generate & print immediately
+        const gen = await generateLabelQueue('label', selectedPrinter)
+        if (gen.success) {
+          setResult(`${res.labelCount ?? qty} label(s) sent to printer`)
+        } else {
+          // Queued but generate failed
+          setResult(`Queued ${res.labelCount ?? qty} label(s) — print failed: ${gen.message ?? 'unknown error'}`)
+        }
       } else {
-        setError(res.message ?? 'Print failed')
+        setResult(`${res.labelCount ?? qty} label(s) added to queue`)
       }
     } catch (err) {
       setError((err as Error).message)
@@ -176,18 +186,38 @@ export default function PrintLabelSheet({ item, onClose }: PrintLabelSheetProps)
           </>
         )}
 
-        {/* Print button */}
-        <button
-          onClick={handlePrint}
-          disabled={busy || !item.barcode || !selectedPrinter || loading}
-          className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {busy ? <Loader2 size={16} className="animate-spin" /> : result ? <CheckCircle size={16} /> : <Printer size={16} />}
-          {result ? 'Queued!' : busy ? 'Sending...' : `Print ${qty} Label${qty > 1 ? 's' : ''}`}
-        </button>
+        {/* Action buttons */}
+        {result ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-center gap-2 text-sm font-medium text-green-600">
+              <CheckCircle size={16} /> {result}
+            </div>
+            <button onClick={onClose} className="w-full py-2.5 text-sm text-violet-600 underline">Close</button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {/* Print Now — primary action */}
+            <button
+              onClick={() => handlePrint(true)}
+              disabled={busy || !item.barcode || !selectedPrinter || loading}
+              className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+              {busy ? 'Printing...' : `Print ${qty} Label${qty > 1 ? 's' : ''} Now`}
+            </button>
+            {/* Queue Only — secondary action */}
+            <button
+              onClick={() => handlePrint(false)}
+              disabled={busy || !item.barcode || !selectedPrinter || loading}
+              className="w-full py-2.5 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg disabled:opacity-50 flex items-center justify-center gap-2 hover:bg-gray-50"
+            >
+              <ListPlus size={16} />
+              Add to Queue
+            </button>
+          </div>
+        )}
 
         {error && <p className="text-xs text-red-600 font-medium text-center">{error}</p>}
-        {result && <p className="text-xs text-green-600 font-medium text-center">{result}</p>}
       </div>
     </div>
   )

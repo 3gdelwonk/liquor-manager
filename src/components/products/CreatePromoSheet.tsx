@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
-import { createPromo } from '../../lib/jarvisActions'
+import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
+import { createPromo, printTalker, generateLabelQueue } from '../../lib/jarvisActions'
 
 interface CreatePromoSheetProps {
   item: StockItem
@@ -22,10 +23,24 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
   const [endDate, setEndDate] = useState(twoWeeks)
   const [sendToPos, setSendToPos] = useState(true)
   const [sendOffer, setSendOffer] = useState(false)
-  const [printTalker, setPrintTalker] = useState(false)
+  const [printTalkerOn, setPrintTalkerOn] = useState(false)
+  const [talkerPrinter, setTalkerPrinter] = useState<number | null>(null)
+  const [talkerPrinters, setTalkerPrinters] = useState<PrinterType[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
+
+  // Load printers that support A4/talkers (not shelf-edge only)
+  useEffect(() => {
+    getPrinters().then(list => {
+      // Printers that can print talkers — A4 printers (id 2, 3) or any non-shelf-edge
+      const a4 = list.filter(p => !p.isLabel || p.isReport)
+      // If none match, include all printers as fallback
+      const available = a4.length > 0 ? a4 : list
+      setTalkerPrinters(available)
+      if (available[0]) setTalkerPrinter(available[0].id)
+    }).catch(() => {})
+  }, [])
 
   const price = Number(promoPrice)
   const discount = item.sellPrice > 0 && price > 0
@@ -52,6 +67,20 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
         const parts: string[] = [`Promotion created`]
         if (res.posSent) parts.push('sent to POS')
         if (res.offerSent) parts.push('portal updated')
+
+        // Print talker if enabled
+        if (printTalkerOn && talkerPrinter && item.barcode) {
+          try {
+            const tRes = await printTalker('manager_specials', [item.barcode])
+            if (tRes.success) {
+              const gRes = await generateLabelQueue('talker', talkerPrinter)
+              parts.push(gRes.success ? 'talker printed' : 'talker queued')
+            }
+          } catch {
+            parts.push('talker failed')
+          }
+        }
+
         setResult(parts.join(' · '))
         onSuccess()
         setTimeout(onClose, 1500)
@@ -141,8 +170,24 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
         <div className="space-y-2">
           <Toggle checked={sendToPos} onChange={setSendToPos} icon={<Send size={14} />} label="Send to POS terminal" color="violet" />
           <Toggle checked={sendOffer} onChange={setSendOffer} icon={<Megaphone size={14} />} label="Update Smart Retail portal" color="violet" />
-          <Toggle checked={printTalker} onChange={setPrintTalker} icon={<Printer size={14} />} label="Print promo talker" color="gray" disabled />
-          {printTalker && <p className="text-[10px] text-gray-400 ml-14">Talker printing coming soon</p>}
+          <Toggle checked={printTalkerOn} onChange={setPrintTalkerOn} icon={<Printer size={14} />} label="Print promo talker" color="violet" />
+          {printTalkerOn && talkerPrinters.length > 0 && (
+            <div className="ml-14 flex flex-wrap gap-1.5">
+              {talkerPrinters.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setTalkerPrinter(p.id)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+                    talkerPrinter === p.id
+                      ? 'border-violet-400 bg-violet-50 text-violet-700'
+                      : 'border-gray-200 text-gray-500'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Create button */}

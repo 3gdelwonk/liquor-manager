@@ -103,14 +103,60 @@ export interface PrintLabelResult {
 
 export async function printLabel(
   barcode: string,
-  options?: { printerId?: number; qty?: number; styleId?: number }
+  options?: { printerId?: number; count?: number; styleId?: number }
 ): Promise<PrintLabelResult> {
   const body: Record<string, unknown> = { barcode }
   if (options?.printerId) body.printerId = options.printerId
-  if (options?.qty && options.qty > 1) body.qty = options.qty
+  if (options?.count && options.count > 1) body.count = options.count
   if (options?.styleId) body.styleId = options.styleId
   const res = await jarvisPost<PrintLabelResult>('/api/pos-actions/print-label', body)
   return { ...res, success: res.ok ?? res.success }
+}
+
+// ── Print Queue Operations ──────────────────────────────────────────────────
+
+export async function generateLabelQueue(
+  type: 'label' | 'talker',
+  printerId: number
+): Promise<{ success: boolean; message?: string }> {
+  const res = await jarvisPost<{ ok?: boolean; success?: boolean; message?: string }>(
+    '/api/pos/label-queue/generate', { type, printerId }
+  )
+  return { success: res.ok ?? res.success ?? false, message: res.message }
+}
+
+export async function removeFromQueue(
+  barcodes: string[],
+  type: 'label' | 'talker'
+): Promise<{ success: boolean; message?: string }> {
+  const res = await jarvisPost<{ ok?: boolean; success?: boolean; message?: string }>(
+    '/api/pos/label-queue/remove', { barcodes, type }
+  )
+  return { success: res.ok ?? res.success ?? false, message: res.message }
+}
+
+export async function markQueuePrinted(
+  barcodes: string[],
+  type: 'label' | 'talker'
+): Promise<{ success: boolean; message?: string }> {
+  const res = await jarvisPost<{ ok?: boolean; success?: boolean; message?: string }>(
+    '/api/pos/label-queue/mark-printed', { barcodes, type }
+  )
+  return { success: res.ok ?? res.success ?? false, message: res.message }
+}
+
+// ── Talker Printing ─────────────────────────────────────────────────────────
+
+export async function printTalker(
+  promoType: string,
+  barcodes?: string[]
+): Promise<{ success: boolean; queued?: number; message?: string }> {
+  const body: Record<string, unknown> = { promoType }
+  if (barcodes?.length) body.barcodes = barcodes
+  const res = await jarvisPost<{ ok?: boolean; success?: boolean; queued?: number; message?: string }>(
+    '/api/pos-actions/print-talker', body
+  )
+  return { success: res.ok ?? res.success ?? false, queued: res.queued, message: res.message }
 }
 
 // ── Price Lock ──────────────────────────────────────────────────────────────

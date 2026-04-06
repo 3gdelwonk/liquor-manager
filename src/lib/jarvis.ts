@@ -742,8 +742,17 @@ export async function getLabelStyles(): Promise<LabelStyle[]> {
   return jarvisFetch<LabelStyle[]>('/api/pos/label-styles');
 }
 
-export async function getLabelQueue(): Promise<{ pending: number; items: LabelQueueItem[] }> {
-  return jarvisFetch<{ pending: number; items: LabelQueueItem[] }>('/api/pos/label-queue');
+export async function getLabelQueue(
+  type?: 'label' | 'talker',
+  printerId?: number
+): Promise<{ pending: number; items: LabelQueueItem[] }> {
+  const params = new URLSearchParams()
+  if (type) params.set('type', type)
+  if (printerId) params.set('printerId', String(printerId))
+  const qs = params.toString()
+  return jarvisFetch<{ pending: number; items: LabelQueueItem[] }>(
+    `/api/pos/label-queue${qs ? `?${qs}` : ''}`
+  );
 }
 
 // ── SerpApi Intelligence ─────────────────────────────────────────────────────

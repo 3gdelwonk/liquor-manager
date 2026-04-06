@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Search, X, Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
-import { createPromo } from '../../lib/jarvisActions'
+import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
+import { createPromo, printTalker, generateLabelQueue } from '../../lib/jarvisActions'
 
 interface BulkPromoSheetProps {
   items: StockItem[]
@@ -28,8 +29,19 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
   const [endDate, setEndDate] = useState(twoWeeks)
   const [sendToPos, setSendToPos] = useState(true)
   const [sendOffer, setSendOffer] = useState(false)
-  const [printTalker, setPrintTalker] = useState(false)
+  const [printTalkerOn, setPrintTalkerOn] = useState(false)
+  const [talkerPrinter, setTalkerPrinter] = useState<number | null>(null)
+  const [talkerPrinters, setTalkerPrinters] = useState<PrinterType[]>([])
   const [processing, setProcessing] = useState(false)
+
+  useEffect(() => {
+    getPrinters().then(list => {
+      const a4 = list.filter(p => !p.isLabel || p.isReport)
+      const available = a4.length > 0 ? a4 : list
+      setTalkerPrinters(available)
+      if (available[0]) setTalkerPrinter(available[0].id)
+    }).catch(() => {})
+  }, [])
   const [result, setResult] = useState<{ ok: number; failed: number; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -124,11 +136,32 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
       }
     }
 
+    // Print talkers if enabled and promos were created
+    let talkerMsg = ''
+    if (printTalkerOn && talkerPrinter && totalOk > 0) {
+      const successBarcodes = valid
+        .filter(e => e.item.barcode)
+        .map(e => e.item.barcode!)
+      if (successBarcodes.length > 0) {
+        try {
+          const tRes = await printTalker('manager_specials', successBarcodes)
+          if (tRes.success) {
+            const gRes = await generateLabelQueue('talker', talkerPrinter)
+            talkerMsg = gRes.success ? ' · talkers printed' : ' · talkers queued'
+          } else {
+            talkerMsg = ' · talker queue failed'
+          }
+        } catch {
+          talkerMsg = ' · talker print failed'
+        }
+      }
+    }
+
     setProcessing(false)
     setResult({
       ok: totalOk,
       failed: totalFailed,
-      message: messages[0] ?? `${totalOk} promotion(s) created`,
+      message: (messages[0] ?? `${totalOk} promotion(s) created`) + talkerMsg,
     })
     if (totalOk > 0) onSuccess()
   }
@@ -206,8 +239,26 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
             <MiniToggle checked={sendToPos} onChange={setSendToPos} icon={<Send size={12} />} label="POS" disabled={processing} />
             <MiniToggle checked={sendOffer} onChange={setSendOffer} icon={<Megaphone size={12} />} label="Portal" disabled={processing} />
-            <MiniToggle checked={printTalker} onChange={setPrintTalker} icon={<Printer size={12} />} label="Talkers" disabled forceDisabled />
+            <MiniToggle checked={printTalkerOn} onChange={setPrintTalkerOn} icon={<Printer size={12} />} label="Talkers" disabled={processing} />
           </div>
+          {printTalkerOn && talkerPrinters.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {talkerPrinters.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setTalkerPrinter(p.id)}
+                  disabled={processing}
+                  className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+                    talkerPrinter === p.id
+                      ? 'border-violet-400 bg-violet-50 text-violet-700'
+                      : 'border-gray-200 text-gray-500'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Search */}
