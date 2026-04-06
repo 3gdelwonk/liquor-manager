@@ -4,9 +4,9 @@ import {
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
   Box, Truck, Trash2,
 } from 'lucide-react'
-import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation } from '../../lib/jarvis'
-import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations } from '../../lib/jarvis'
-import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation } from '../../lib/jarvisActions'
+import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
+import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
+import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment } from '../../lib/jarvisActions'
 import { flattenLocations, buildLocationTree, formatItemLocation, getDisplayLabel } from '../../lib/locationUtils'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
@@ -111,6 +111,12 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
   // Stock adjustment sheet
   const [showAdjustSheet, setShowAdjustSheet] = useState(false)
+
+  // Department change
+  const [showDeptPanel, setShowDeptPanel] = useState(false)
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [deptLoading, setDeptLoading] = useState(false)
+  const [deptBusy, setDeptBusy] = useState(false)
 
   // Location inline
   const [showLocationPanel, setShowLocationPanel] = useState(false)
@@ -301,6 +307,36 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }
   }
 
+  // Load departments when panel opens
+  useEffect(() => {
+    if (!showDeptPanel || departments.length > 0) return
+    setDeptLoading(true)
+    getDepartmentList()
+      .then(list => { if (mounted.current) setDepartments(list) })
+      .catch(() => { if (mounted.current) flashMsg('Failed to load departments') })
+      .finally(() => { if (mounted.current) setDeptLoading(false) })
+  }, [showDeptPanel, departments.length])
+
+  async function handleChangeDepartment(dept: Department) {
+    if (!item.barcode) return
+    setDeptBusy(true)
+    try {
+      const res = await changeDepartment(item.barcode, dept.code, dept.name)
+      if (!mounted.current) return
+      if (res.success) {
+        flashMsg(`Department → ${dept.name}`)
+        setShowDeptPanel(false)
+        onRefresh?.()
+      } else {
+        flashMsg(res.message ?? 'Failed to change department')
+      }
+    } catch (err) {
+      if (mounted.current) flashMsg((err as Error).message)
+    } finally {
+      if (mounted.current) setDeptBusy(false)
+    }
+  }
+
   async function handleSendToPos() {
     if (!item.barcode) return
     setSendBusy(true)
@@ -438,6 +474,47 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       orderInfo.cartonQty && orderInfo.cartonCost && `Ctn ${orderInfo.cartonQty}×$${fmtMoney(orderInfo.unitCost ?? 0)}`,
                     ].filter(Boolean).join(' · ')}
                   </span>
+                </div>
+              )}
+
+              {/* Department — tappable to change */}
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowDeptPanel(p => !p) }}
+                className="w-full flex items-center gap-1.5 text-xs px-1 py-1 rounded-lg hover:bg-gray-50 transition-colors text-left"
+              >
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${badgeClass}`}>
+                  {item.department}
+                </span>
+                <span className="text-gray-400">Dept {item.departmentCode}</span>
+                <span className="text-gray-300 ml-auto text-[10px]">tap to change</span>
+              </button>
+
+              {/* Department change panel */}
+              {showDeptPanel && (
+                <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-gray-500 uppercase">Change Department</p>
+                  {deptLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-gray-400">
+                      <Loader2 size={12} className="animate-spin" /> Loading departments...
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {departments.map(d => (
+                        <button
+                          key={d.code}
+                          onClick={(e) => { e.stopPropagation(); handleChangeDepartment(d) }}
+                          disabled={deptBusy || d.code === item.departmentCode}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            d.code === item.departmentCode
+                              ? 'border-violet-400 bg-violet-50 text-violet-700'
+                              : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-white'
+                          } disabled:opacity-50`}
+                        >
+                          {d.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -700,6 +777,7 @@ export default memo(ProductCard, (prev, next) =>
   prev.item.onHand === next.item.onHand &&
   prev.item.priceLocked === next.item.priceLocked &&
   prev.item.avgCost === next.item.avgCost &&
+  prev.item.department === next.item.department &&
   prev.promo === next.promo &&
   prev.isTracked === next.isTracked
 )

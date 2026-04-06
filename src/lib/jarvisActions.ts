@@ -45,6 +45,17 @@ export async function adjustStock(
   return jarvisPost('/api/pos-actions/adjust-stock', { barcode, quantity: adjustment, reason })
 }
 
+export async function changeDepartment(
+  barcode: string,
+  departmentCode: number,
+  departmentName: string
+): Promise<{ success: boolean; message?: string }> {
+  return jarvisPut(`/api/pos-actions/department/${encodeURIComponent(barcode)}`, {
+    departmentCode,
+    departmentName,
+  })
+}
+
 export interface CreateItemPayload {
   barcode: string
   description: string

@@ -62,6 +62,7 @@ export default function ProductsView() {
   const trackedItemCodes = useTrackedItemCodes()
   const { resolveCode } = useProductCodeLookup()
   const searchTimer = useRef<ReturnType<typeof setTimeout>>()
+  const searchedItems = useRef<Map<string, StockItem>>(new Map()) // persists scanned/searched items across refreshes
 
   // Build promo lookup: itemCode → LivePromotion
   const promoMap = useMemo(() => {
@@ -86,9 +87,13 @@ export default function ProductsView() {
         getStockLevels({ limit: 5000 }),
         getPromotions(),
       ])
-      // Filter to liquor departments only
+      // Filter to liquor departments, then merge in any search-added items
       const liquorItems = stock.filter(s => LIQUOR_DEPT_NAMES.has(s.department))
-      setItems(liquorItems)
+      const merged = new Map(liquorItems.map(i => [i.itemCode, i]))
+      for (const [code, item] of searchedItems.current) {
+        if (!merged.has(code)) merged.set(code, item)
+      }
+      setItems(Array.from(merged.values()))
       setPromos(promoData.items)
       setLastFetch(new Date())
     } catch (err) {
@@ -104,7 +109,7 @@ export default function ProductsView() {
     return () => clearInterval(iv)
   }, [fetchData])
 
-  // Debounced server search
+  // Debounced server search — returns ALL departments so scanned items always persist
   const handleSearch = useCallback((query: string) => {
     setSearch(query)
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -112,13 +117,19 @@ export default function ProductsView() {
     searchTimer.current = setTimeout(async () => {
       try {
         const res = await searchItems(query, 100)
-        const liquor = res.items.filter(s => LIQUOR_DEPT_NAMES.has(s.department))
-        if (liquor.length > 0) setItems(prev => {
-          // Merge search results with existing, dedup by itemCode
-          const existing = new Map(prev.map(i => [i.itemCode, i]))
-          for (const item of liquor) existing.set(item.itemCode, item)
-          return Array.from(existing.values())
-        })
+        if (res.items.length > 0) {
+          // Track non-liquor items so they survive fetchData refreshes
+          for (const item of res.items) {
+            if (!LIQUOR_DEPT_NAMES.has(item.department)) {
+              searchedItems.current.set(item.itemCode, item)
+            }
+          }
+          setItems(prev => {
+            const existing = new Map(prev.map(i => [i.itemCode, i]))
+            for (const item of res.items) existing.set(item.itemCode, item)
+            return Array.from(existing.values())
+          })
+        }
       } catch { /* keep existing data on search failure */ }
     }, 300)
   }, [])
@@ -315,7 +326,7 @@ export default function ProductsView() {
           />
           {search && (
             <button
-              onClick={() => { setSearch(''); fetchData() }}
+              onClick={() => { setSearch(''); searchedItems.current.clear(); fetchData() }}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
               <X size={14} />
