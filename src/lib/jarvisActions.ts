@@ -42,7 +42,7 @@ export async function adjustStock(
   adjustment: number,
   reason?: string
 ): Promise<{ success: boolean; newQoh?: number; message?: string }> {
-  return jarvisPost('/api/pos-actions/adjust-stock', { barcode, adjustment, reason })
+  return jarvisPost('/api/pos-actions/adjust-stock', { barcode, quantity: adjustment, reason })
 }
 
 export interface CreateItemPayload {
