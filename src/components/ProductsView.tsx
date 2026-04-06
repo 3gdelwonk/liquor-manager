@@ -134,12 +134,30 @@ export default function ProductsView() {
     }, 300)
   }, [])
 
-  // Handle barcode scan
-  const handleScan = useCallback((code: string) => {
+  // Handle barcode scan — reset filters and do immediate server lookup
+  const handleScan = useCallback(async (code: string) => {
     setScannerOpen(false)
+    setSegment('all')
+    setDeptFilter('all')
     const resolved = resolveCode(code)
-    handleSearch(resolved)
-  }, [resolveCode, handleSearch])
+    setSearch(resolved)
+    // Immediate server search (no debounce) for barcode scans
+    try {
+      const res = await searchItems(resolved, 20)
+      if (res.items.length > 0) {
+        for (const item of res.items) {
+          if (!LIQUOR_DEPT_NAMES.has(item.department)) {
+            searchedItems.current.set(item.itemCode, item)
+          }
+        }
+        setItems(prev => {
+          const existing = new Map(prev.map(i => [i.itemCode, i]))
+          for (const item of res.items) existing.set(item.itemCode, item)
+          return Array.from(existing.values())
+        })
+      }
+    } catch { /* keep existing data */ }
+  }, [resolveCode])
 
   // Handle action from ProductCard
   function handleCardAction(item: StockItem, action: 'price' | 'promo' | 'createItem' | 'printLabel') {
