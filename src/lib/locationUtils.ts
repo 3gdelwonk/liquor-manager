@@ -60,6 +60,18 @@ export const TYPE_LABELS: Record<number, string> = {
   4: 'Zone',
 }
 
+/** Display labels — shows "Shelf" instead of "Row" for user-facing UI */
+export const TYPE_DISPLAY_LABELS: Record<number, string> = {
+  1: 'Aisle',
+  2: 'Bay',
+  3: 'Shelf',
+  4: 'Zone',
+}
+
 export function getTypeLabel(typeId: number, typeName?: string): string {
   return typeName || TYPE_LABELS[typeId] || 'Location'
+}
+
+export function getDisplayLabel(typeId: number): string {
+  return TYPE_DISPLAY_LABELS[typeId] || 'Location'
 }
