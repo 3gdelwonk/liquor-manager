@@ -109,25 +109,28 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
     setError(null)
     setResult(null)
 
-    // Group entries by promo price for batch calls
-    // Since the API takes barcodes[] with one price, group by price
-    const priceGroups = new Map<number, string[]>()
+    // Group entries by promo price + normal price for batch calls
+    const groupKey = (promo: number, normal: number) => `${promo}|${normal}`
+    const priceGroups = new Map<string, { promoPrice: number; normalPrice: number; barcodes: string[] }>()
     for (const e of valid) {
       const p = Number(Number(e.promoPrice).toFixed(2))
-      const group = priceGroups.get(p) ?? []
-      group.push(e.item.barcode!)
-      priceGroups.set(p, group)
+      const n = e.item.sellPrice
+      const key = groupKey(p, n)
+      const group = priceGroups.get(key) ?? { promoPrice: p, normalPrice: n, barcodes: [] }
+      group.barcodes.push(e.item.barcode!)
+      priceGroups.set(key, group)
     }
 
     let totalOk = 0
     let totalFailed = 0
     const messages: string[] = []
 
-    for (const [price, barcodes] of priceGroups) {
+    for (const [, { promoPrice: price, normalPrice, barcodes }] of priceGroups) {
       try {
         const res = await createPromo({
           barcodes,
           promoSellPrice: price,
+          normalSellPrice: normalPrice,
           startDate,
           endDate,
           promoType,

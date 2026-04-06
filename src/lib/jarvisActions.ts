@@ -66,6 +66,7 @@ export async function createItem(
 export interface CreatePromoPayload {
   barcodes: string[]
   promoSellPrice: number
+  normalSellPrice?: number
   startDate: string
   endDate: string
   promoType?: string

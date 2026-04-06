@@ -68,6 +68,7 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
       const res = await createPromo({
         barcodes: [item.barcode],
         promoSellPrice: price,
+        normalSellPrice: item.sellPrice,
         startDate,
         endDate,
         promoType,
