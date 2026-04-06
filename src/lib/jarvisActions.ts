@@ -68,6 +68,7 @@ export interface CreatePromoPayload {
   promoSellPrice: number
   startDate: string
   endDate: string
+  promoType?: string
   sendToPos?: boolean
   sendOffer?: boolean
 }

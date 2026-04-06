@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react'
-import { Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer } from 'lucide-react'
+import { Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer, Award } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
 import { createPromo, printTalker, generateLabelQueue } from '../../lib/jarvisActions'
+
+const PROMO_TYPES = [
+  { key: 'iga_rewards',        label: 'IGA Rewards',       talker: 'iga_rewards' },
+  { key: 'manager_specials',   label: 'Manager Special',   talker: 'manager_specials' },
+  { key: 'price_reduction',    label: 'Price Reduction',   talker: 'price_reduction' },
+  { key: 'multibuy',           label: 'Multi-Buy',         talker: 'multibuy' },
+  { key: 'clearance',          label: 'Clearance',         talker: 'clearance' },
+  { key: 'seasonal',           label: 'Seasonal',          talker: 'seasonal' },
+] as const
 
 interface CreatePromoSheetProps {
   item: StockItem
@@ -19,6 +28,7 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
   const twoWeeks = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)
 
   const [promoPrice, setPromoPrice] = useState('')
+  const [promoType, setPromoType] = useState('iga_rewards')
   const [startDate, setStartDate] = useState(today)
   const [endDate, setEndDate] = useState(twoWeeks)
   const [sendToPos, setSendToPos] = useState(true)
@@ -60,6 +70,7 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
         promoSellPrice: price,
         startDate,
         endDate,
+        promoType,
         sendToPos,
         sendOffer,
       })
@@ -71,7 +82,8 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
         // Print talker if enabled
         if (printTalkerOn && talkerPrinter && item.barcode) {
           try {
-            const tRes = await printTalker('manager_specials', [item.barcode])
+            const talkerType = PROMO_TYPES.find(t => t.key === promoType)?.talker ?? 'manager_specials'
+            const tRes = await printTalker(talkerType, [item.barcode])
             if (tRes.success) {
               const gRes = await generateLabelQueue('talker', talkerPrinter)
               parts.push(gRes.success ? 'talker printed' : 'talker queued')
@@ -137,6 +149,29 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
                 {margin.toFixed(1)}% margin at promo
               </span>
             )}
+          </div>
+        </div>
+
+        {/* Promo type */}
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <Award size={12} /> Promotion Type
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {PROMO_TYPES.map(t => (
+              <button
+                key={t.key}
+                onClick={() => setPromoType(t.key)}
+                disabled={busy}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  promoType === t.key
+                    ? 'border-violet-400 bg-violet-50 text-violet-700'
+                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                } disabled:opacity-50`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
 

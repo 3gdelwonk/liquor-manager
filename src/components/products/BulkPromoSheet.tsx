@@ -1,8 +1,17 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Search, X, Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer } from 'lucide-react'
+import { Search, X, Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer, Award } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
 import { createPromo, printTalker, generateLabelQueue } from '../../lib/jarvisActions'
+
+const PROMO_TYPES = [
+  { key: 'iga_rewards',        label: 'IGA Rewards',       talker: 'iga_rewards' },
+  { key: 'manager_specials',   label: 'Manager Special',   talker: 'manager_specials' },
+  { key: 'price_reduction',    label: 'Price Reduction',   talker: 'price_reduction' },
+  { key: 'multibuy',           label: 'Multi-Buy',         talker: 'multibuy' },
+  { key: 'clearance',          label: 'Clearance',         talker: 'clearance' },
+  { key: 'seasonal',           label: 'Seasonal',          talker: 'seasonal' },
+] as const
 
 interface BulkPromoSheetProps {
   items: StockItem[]
@@ -25,6 +34,7 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
 
   const [search, setSearch] = useState('')
   const [entries, setEntries] = useState<PromoEntry[]>([])
+  const [promoType, setPromoType] = useState('iga_rewards')
   const [startDate, setStartDate] = useState(today)
   const [endDate, setEndDate] = useState(twoWeeks)
   const [sendToPos, setSendToPos] = useState(true)
@@ -120,6 +130,7 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
           promoSellPrice: price,
           startDate,
           endDate,
+          promoType,
           sendToPos,
           sendOffer,
         })
@@ -144,7 +155,8 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
         .map(e => e.item.barcode!)
       if (successBarcodes.length > 0) {
         try {
-          const tRes = await printTalker('manager_specials', successBarcodes)
+          const talkerType = PROMO_TYPES.find(t => t.key === promoType)?.talker ?? 'manager_specials'
+          const tRes = await printTalker(talkerType, successBarcodes)
           if (tRes.success) {
             const gRes = await generateLabelQueue('talker', talkerPrinter)
             talkerMsg = gRes.success ? ' · talkers printed' : ' · talkers queued'
@@ -180,6 +192,29 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
 
         {/* Shared settings */}
         <div className="px-4 pt-3 space-y-3 shrink-0 border-b border-gray-100 pb-3">
+          {/* Promo type selector */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-gray-500 uppercase flex items-center gap-1">
+              <Award size={10} /> Promotion Type
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {PROMO_TYPES.map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setPromoType(t.key)}
+                  disabled={processing}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    promoType === t.key
+                      ? 'border-violet-400 bg-violet-50 text-violet-700'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  } disabled:opacity-50`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Date range */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
