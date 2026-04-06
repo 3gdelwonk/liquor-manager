@@ -204,12 +204,16 @@ export default function ProductsView() {
     // is longer than the stored barcode (e.g., 12 digits without check digit), or vice versa
     if (search.trim()) {
       const q = search.trim().toLowerCase()
-      list = list.filter(i =>
-        i.description.toLowerCase().includes(q) ||
-        i.itemCode.toLowerCase().includes(q) ||
-        (i.barcode && (i.barcode.includes(q) || q.includes(i.barcode))) ||
-        (i.orderCode && i.orderCode.includes(q))
-      )
+      list = list.filter(i => {
+        const bc = i.barcode?.trim() ?? ''
+        const oc = i.orderCode?.trim() ?? ''
+        return (
+          i.description.toLowerCase().includes(q) ||
+          i.itemCode.toLowerCase().includes(q) ||
+          (bc && (bc.includes(q) || q.includes(bc))) ||
+          (oc && (oc.includes(q) || q.includes(oc)))
+        )
+      })
     }
 
     // Segment filter
@@ -243,11 +247,16 @@ export default function ProductsView() {
     let filtered = items
     if (search.trim()) {
       const q = search.trim().toLowerCase()
-      filtered = filtered.filter(i =>
-        i.description.toLowerCase().includes(q) ||
-        i.itemCode.toLowerCase().includes(q) ||
-        (i.barcode && i.barcode.includes(q))
-      )
+      filtered = filtered.filter(i => {
+        const bc = i.barcode?.trim() ?? ''
+        const oc = i.orderCode?.trim() ?? ''
+        return (
+          i.description.toLowerCase().includes(q) ||
+          i.itemCode.toLowerCase().includes(q) ||
+          (bc && (bc.includes(q) || q.includes(bc))) ||
+          (oc && (oc.includes(q) || q.includes(oc)))
+        )
+      })
     }
     if (segment === 'promo') filtered = filtered.filter(i => promoMap.has(i.itemCode))
     else if (segment === 'low') filtered = filtered.filter(i => i.onHand < i.reorderLevel)
