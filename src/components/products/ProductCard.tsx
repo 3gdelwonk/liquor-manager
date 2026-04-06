@@ -402,6 +402,11 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     <p className={`text-sm font-semibold ${item.onHand <= 0 ? 'text-red-600' : item.onHand < item.reorderLevel ? 'text-amber-600' : 'text-green-600'}`}>{item.onHand}</p>
                     {item.isOnReorder && <span className="flex items-center justify-center gap-0.5 text-[9px] text-blue-600 font-medium mt-0.5"><Box size={8} /> On order ({item.onOrder})</span>}
                   </button>
+                  <MetricCell
+                    label="Price"
+                    value={`$${fmtMoney(item.sellPrice)}`}
+                    sub={promo ? <span className="text-[9px] font-medium text-amber-600">Promo ${fmtMoney(promo.promoPrice)}</span> : undefined}
+                  />
                   <MetricCell label="Cost" value={item.avgCost > 0 ? `$${fmtMoney(item.avgCost)}` : '—'} />
                   {(() => {
                     const m = item.sellPrice > 0 && item.avgCost > 0 ? ((item.sellPrice - item.avgCost) / item.sellPrice * 100) : null

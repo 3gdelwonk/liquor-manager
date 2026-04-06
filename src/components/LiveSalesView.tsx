@@ -714,6 +714,9 @@ export default function LiveSalesView() {
                               <p className="text-xs text-gray-400">{item.quantitySold} sold</p>
                             </>
                           )}
+                          {item.quantitySold > 0 && (
+                            <p className="text-[10px] text-violet-500 mt-0.5">${fmtMoney(item.revenue / item.quantitySold)}/ea</p>
+                          )}
                         </div>
                       </div>
                       {barcode && <div className="ml-9 mr-2"><BarcodeStripe value={barcode} height={32} /></div>}
@@ -785,6 +788,7 @@ export default function LiveSalesView() {
                           </div>
                         </div>
                         <div className="text-right shrink-0">
+                          <p className="text-xs font-semibold text-gray-700">${fmtMoney(item.sellPrice)}</p>
                           <p className={`text-sm font-bold ${negative ? 'text-red-600' : low ? 'text-amber-600' : 'text-gray-800'}`}>
                             {item.onHand}
                           </p>
