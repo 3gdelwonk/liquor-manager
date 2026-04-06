@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { Search, X, Loader2, RefreshCw, ScanBarcode, ChevronDown, Printer, Zap } from 'lucide-react'
+import { Search, X, Loader2, RefreshCw, ScanBarcode, ChevronDown } from 'lucide-react'
 import type { StockItem, LivePromotion } from '../../lib/jarvis'
 import { checkConnection, getStockLevels, getPromotions, LIQUOR_DEPT_NAMES } from '../../lib/jarvis'
 import CrewProductCard from './CrewProductCard'
