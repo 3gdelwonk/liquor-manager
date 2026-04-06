@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ScanBarcode, Search, Loader2, Package, MapPin, CalendarClock, Printer, X, AlertTriangle } from 'lucide-react'
+import { ScanBarcode, Search, Loader2, MapPin, CalendarClock, Printer } from 'lucide-react'
 import type { StockItem, LivePromotion, ItemLocation } from '../../lib/jarvis'
 import { searchItems, getItemLocations, getPromotions } from '../../lib/jarvis'
 import { formatItemLocation } from '../../lib/locationUtils'
@@ -90,7 +90,6 @@ export default function CrewScanView() {
   }
 
   const nearestExpiry = expiries[0]
-  const expiryDays = nearestExpiry ? daysUntil(nearestExpiry.expiryDate) : null
 
   return (
     <div className="flex flex-col h-full">

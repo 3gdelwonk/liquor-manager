@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { CalendarClock, AlertTriangle, Clock, Trash2, RefreshCw, Filter } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { CalendarClock, Trash2 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type ExpiryRecord } from '../../lib/db'
 import ProductImage from '../ProductImage'
