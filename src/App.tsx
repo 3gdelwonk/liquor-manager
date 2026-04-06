@@ -1,7 +1,7 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, useRef, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { Lightbulb, Package, BarChart2, Settings, Activity, Crosshair } from 'lucide-react'
+import { Lightbulb, Package, BarChart2, Settings, Activity, Crosshair, ArrowLeftRight } from 'lucide-react'
 import { clearAllData } from './lib/db'
 import { getStockLevels, LIQUOR_DEPT_NAMES } from './lib/jarvis'
 import { prefetchImages, isImageSearchConfigured, clearImageCache, type PrefetchProgress } from './lib/images'
@@ -10,6 +10,10 @@ import ProductsView from './components/ProductsView'
 import PerformanceView from './components/PerformanceView'
 import LiveSalesView from './components/LiveSalesView'
 import TrackingView from './components/TrackingView'
+import CrewApp from './components/crew/CrewApp'
+
+const APP_MODE_KEY = 'liquor-manager-mode'
+type AppMode = 'manager' | 'crew'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
 
@@ -248,6 +252,9 @@ const TAB_TITLES: Record<Tab, string> = {
 const LAST_TAB_KEY = 'liquor-manager-last-tab'
 
 export default function App() {
+  const [mode, setMode] = useState<AppMode>(() => {
+    return (localStorage.getItem(APP_MODE_KEY) as AppMode) ?? 'manager'
+  })
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem(LAST_TAB_KEY) as Tab | null
     return saved && TABS.some(t => t.id === saved) ? saved : 'live'
@@ -259,6 +266,11 @@ export default function App() {
     const orientation = screen?.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
     orientation?.lock?.('portrait-primary')?.catch(() => {})
   })
+
+  function switchMode(newMode: AppMode) {
+    setMode(newMode)
+    localStorage.setItem(APP_MODE_KEY, newMode)
+  }
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -276,13 +288,36 @@ export default function App() {
     }
   }
 
+  // Crew mode
+  if (mode === 'crew') {
+    return (
+      <div className="flex flex-col h-screen-safe max-w-[480px] mx-auto bg-white relative">
+        <UpdateBanner />
+        <ErrorBoundary>
+          <CrewApp onSwitchMode={() => switchMode('manager')} />
+        </ErrorBoundary>
+      </div>
+    )
+  }
+
+  // Manager mode
   return (
     <div className="flex flex-col h-screen-safe max-w-[480px] mx-auto bg-white relative">
       <header className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white shrink-0">
         <h1 className="text-base font-semibold text-gray-900">{TAB_TITLES[activeTab]}</h1>
-        <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500" aria-label="Settings">
-          <Settings size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => switchMode('crew')}
+            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-gray-500 hover:text-blue-600 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Switch to Crew mode"
+          >
+            <ArrowLeftRight size={14} />
+            Crew
+          </button>
+          <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500" aria-label="Settings">
+            <Settings size={18} />
+          </button>
+        </div>
       </header>
 
       <UpdateBanner />
