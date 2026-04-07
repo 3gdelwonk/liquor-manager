@@ -708,8 +708,13 @@ export interface Department {
 }
 
 export async function getDepartmentList(): Promise<Department[]> {
-  const raw = await jarvisFetch<Department[] | { departments: Department[] }>('/api/pos/department-list');
-  return Array.isArray(raw) ? raw : raw.departments;
+  const raw = await jarvisFetch<Record<string, unknown>[] | { departments: Record<string, unknown>[] }>('/api/pos/department-list');
+  const list = Array.isArray(raw) ? raw : raw.departments;
+  // Normalize — API may return PascalCase (Code/Name) or lowercase (code/name)
+  return list.map(d => ({
+    code: (d.code ?? d.Code ?? d.DepartmentCode ?? 0) as number,
+    name: (d.name ?? d.Name ?? d.DepartmentName ?? '') as string,
+  })).filter(d => d.name !== '');
 }
 
 // ── Printers & Label Queue ──────────────────────────────────────────────────
