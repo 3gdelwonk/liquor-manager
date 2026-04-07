@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Loader2, CheckCircle, ScanBarcode } from 'lucide-react'
-import { getDepartmentList, LIQUOR_DEPT_NAMES, type Department } from '../../lib/jarvis'
+import { getDepartmentList, type Department } from '../../lib/jarvis'
 import { createItem, type CreateItemPayload } from '../../lib/jarvisActions'
 import BarcodeScanner from '../BarcodeScanner'
 
@@ -16,6 +16,8 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
     department: '',
     sellPrice: 0,
     costPrice: 0,
+    gst: true,
+    cartonQty: 1,
     reorderLevel: 1,
   })
   const [departments, setDepartments] = useState<Department[]>([])
@@ -26,7 +28,10 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
 
   useEffect(() => {
     getDepartmentList()
-      .then(depts => setDepartments(depts.filter(d => LIQUOR_DEPT_NAMES.has(d.name))))
+      .then(depts => {
+        // Show all departments from the database — don't filter
+        setDepartments(depts)
+      })
       .catch(() => {
         // Fallback liquor departments
         setDepartments([
@@ -39,25 +44,39 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
       })
   }, [])
 
-  function updateField(key: keyof CreateItemPayload, value: string | number) {
+  function updateField(key: keyof CreateItemPayload, value: string | number | boolean) {
     setForm(prev => ({ ...prev, [key]: value }))
   }
+
+  // Calculate margin percentage: ((sell - cost) / sell) * 100
+  const margin = useMemo(() => {
+    const sell = Number(form.sellPrice) || 0
+    const cost = Number(form.costPrice) || 0
+    if (sell <= 0) return null
+    // If GST-bearing, the sell price includes 10% GST — strip it for margin calc
+    const sellEx = form.gst ? sell / 1.1 : sell
+    const m = ((sellEx - cost) / sellEx) * 100
+    return m
+  }, [form.sellPrice, form.costPrice, form.gst])
 
   async function handleCreate() {
     if (!form.barcode?.trim() || !form.description?.trim() || !form.department) return
     setBusy(true)
     setError(null)
     try {
+      const selectedDept = departments.find(d => d.name === form.department)
       const res = await createItem({
         barcode: form.barcode.trim(),
         description: form.description.trim(),
         department: form.department,
+        departmentCode: selectedDept?.code,
         sellPrice: Number(form.sellPrice) || 0,
         costPrice: Number(form.costPrice) || 0,
+        gst: form.gst ?? true,
+        cartonQty: form.cartonQty ? Number(form.cartonQty) : undefined,
         reorderLevel: Number(form.reorderLevel) || 1,
         supplier: form.supplier?.trim() || undefined,
         orderCode: form.orderCode?.trim() || undefined,
-        cartonQty: form.cartonQty ? Number(form.cartonQty) : undefined,
       })
       if (res.success) {
         setSuccess(true)
@@ -120,28 +139,20 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
           <select
             value={form.department ?? ''}
             onChange={e => updateField('department', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white appearance-none"
           >
             <option value="">Select department...</option>
             {departments.map(d => (
               <option key={d.code} value={d.name}>{d.name}</option>
             ))}
           </select>
+          {departments.length === 0 && (
+            <p className="text-xs text-amber-600">Loading departments...</p>
+          )}
         </div>
 
         {/* Price row */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-gray-700">Sell Price</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.sellPrice ?? ''}
-              onChange={e => updateField('sellPrice', e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-            />
-          </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-gray-700">Cost Price</label>
             <input
@@ -153,18 +164,64 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
             />
           </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Sell Price</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.sellPrice ?? ''}
+              onChange={e => updateField('sellPrice', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </div>
         </div>
 
-        {/* Reorder level */}
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-gray-700">Reorder Level</label>
-          <input
-            type="number"
-            min="0"
-            value={form.reorderLevel ?? ''}
-            onChange={e => updateField('reorderLevel', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
+        {/* GST + Margin row */}
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.gst ?? true}
+              onChange={e => updateField('gst', e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-300"
+            />
+            <span className="text-sm font-medium text-gray-700">GST Inclusive</span>
+          </label>
+          <div className="ml-auto text-sm text-gray-500">
+            Margin:{' '}
+            {margin !== null ? (
+              <span className={margin >= 0 ? 'font-semibold text-emerald-600' : 'font-semibold text-red-600'}>
+                {margin.toFixed(1)}%
+              </span>
+            ) : (
+              <span className="text-gray-400">—</span>
+            )}
+          </div>
+        </div>
+
+        {/* Carton Qty + Reorder Level row */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Units per Carton</label>
+            <input
+              type="number"
+              min="1"
+              value={form.cartonQty ?? ''}
+              onChange={e => updateField('cartonQty', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Reorder Level</label>
+            <input
+              type="number"
+              min="0"
+              value={form.reorderLevel ?? ''}
+              onChange={e => updateField('reorderLevel', e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+          </div>
         </div>
 
         {/* Optional fields */}

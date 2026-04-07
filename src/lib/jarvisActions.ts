@@ -60,12 +60,14 @@ export interface CreateItemPayload {
   barcode: string
   description: string
   department: string
+  departmentCode?: number
   sellPrice: number
   costPrice: number
+  gst?: boolean
+  cartonQty?: number
   reorderLevel?: number
   supplier?: string
   orderCode?: string
-  cartonQty?: number
 }
 
 export async function createItem(
