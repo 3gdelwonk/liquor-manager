@@ -73,7 +73,10 @@ export interface CreateItemPayload {
 export async function createItem(
   payload: CreateItemPayload
 ): Promise<{ success: boolean; itemCode?: string; message?: string }> {
-  return jarvisPost('/api/pos-actions/create-item', payload)
+  const res = await jarvisPost<{ ok?: boolean; success?: boolean; itemCode?: string; message?: string }>(
+    '/api/pos-actions/create-item', payload
+  )
+  return { ...res, success: res.ok ?? res.success ?? false }
 }
 
 export interface CreatePromoPayload {
