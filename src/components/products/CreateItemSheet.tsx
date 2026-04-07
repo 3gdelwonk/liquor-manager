@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Loader2, CheckCircle, ScanBarcode } from 'lucide-react'
-import { getDepartmentList, type Department } from '../../lib/jarvis'
+import { getDepartmentList, LIQUOR_DEPT_CODES, type Department } from '../../lib/jarvis'
 import { createItem, type CreateItemPayload } from '../../lib/jarvisActions'
 import BarcodeScanner from '../BarcodeScanner'
 
@@ -25,15 +25,15 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  // Cost entry mode: 'total' = enter total + qty, 'unit' = enter cost price directly
+  const [costMode, setCostMode] = useState<'total' | 'unit'>('unit')
+  const [totalCost, setTotalCost] = useState('')
+  const [totalQty, setTotalQty] = useState('')
 
   useEffect(() => {
     getDepartmentList()
-      .then(depts => {
-        // Show all departments from the database — don't filter
-        setDepartments(depts)
-      })
+      .then(depts => setDepartments(depts.filter(d => LIQUOR_DEPT_CODES.has(d.code))))
       .catch(() => {
-        // Fallback liquor departments
         setDepartments([
           { code: 20, name: 'LIQUEURS' },
           { code: 21, name: 'WINE' },
@@ -48,12 +48,21 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
     setForm(prev => ({ ...prev, [key]: value }))
   }
 
+  // When total cost or qty changes, recalculate unit cost
+  useEffect(() => {
+    if (costMode !== 'total') return
+    const t = Number(totalCost) || 0
+    const q = Number(totalQty) || 0
+    if (q > 0) {
+      updateField('costPrice', Math.round((t / q) * 100) / 100)
+    }
+  }, [totalCost, totalQty, costMode])
+
   // Calculate margin percentage: ((sell - cost) / sell) * 100
   const margin = useMemo(() => {
     const sell = Number(form.sellPrice) || 0
     const cost = Number(form.costPrice) || 0
     if (sell <= 0) return null
-    // If GST-bearing, the sell price includes 10% GST — strip it for margin calc
     const sellEx = form.gst ? sell / 1.1 : sell
     const m = ((sellEx - cost) / sellEx) * 100
     return m
@@ -92,6 +101,9 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
     }
   }
 
+  const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300'
+  const dollarInputCls = 'w-full border border-gray-200 rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300'
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -110,7 +122,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
               value={form.barcode ?? ''}
               onChange={e => updateField('barcode', e.target.value)}
               placeholder="Scan or enter barcode"
-              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              className={'flex-1 ' + inputCls.replace('w-full ', '')}
             />
             <button
               onClick={() => setScannerOpen(true)}
@@ -129,7 +141,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
             value={form.description ?? ''}
             onChange={e => updateField('description', e.target.value)}
             placeholder="Product name"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            className={inputCls}
           />
         </div>
 
@@ -139,7 +151,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
           <select
             value={form.department ?? ''}
             onChange={e => updateField('department', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white appearance-none"
+            className={inputCls + ' bg-white appearance-none'}
           >
             <option value="">Select department...</option>
             {departments.map(d => (
@@ -151,28 +163,98 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
           )}
         </div>
 
-        {/* Price row */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
+        {/* Cost entry mode toggle */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-gray-700">Cost Price</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.costPrice ?? ''}
-              onChange={e => updateField('costPrice', e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-            />
+            <div className="ml-auto flex rounded-lg border border-gray-200 text-xs overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setCostMode('unit')}
+                className={`px-3 py-1 ${costMode === 'unit' ? 'bg-violet-600 text-white' : 'text-gray-500'}`}
+              >
+                Unit
+              </button>
+              <button
+                type="button"
+                onClick={() => setCostMode('total')}
+                className={`px-3 py-1 ${costMode === 'total' ? 'bg-violet-600 text-white' : 'text-gray-500'}`}
+              >
+                Total / Qty
+              </button>
+            </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-gray-700">Sell Price</label>
+
+          {costMode === 'unit' ? (
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.costPrice ?? ''}
+                onChange={e => updateField('costPrice', e.target.value)}
+                placeholder="0.00"
+                className={dollarInputCls}
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-5 gap-2 items-end">
+              <div className="col-span-2 space-y-1">
+                <label className="text-xs text-gray-500">Total Price</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={totalCost}
+                    onChange={e => setTotalCost(e.target.value)}
+                    placeholder="0.00"
+                    className={dollarInputCls}
+                  />
+                </div>
+              </div>
+              <div className="col-span-1 space-y-1">
+                <label className="text-xs text-gray-500">Qty</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={totalQty}
+                  onChange={e => setTotalQty(e.target.value)}
+                  placeholder="1"
+                  className={inputCls}
+                />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <label className="text-xs text-gray-500">Unit Cost</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+                  <input
+                    type="number"
+                    readOnly
+                    value={form.costPrice ?? ''}
+                    className={dollarInputCls + ' bg-gray-50 text-gray-600'}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Sell Price */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-gray-700">Sell Price</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
             <input
               type="number"
               step="0.01"
               min="0"
               value={form.sellPrice ?? ''}
               onChange={e => updateField('sellPrice', e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              placeholder="0.00"
+              className={dollarInputCls}
             />
           </div>
         </div>
@@ -195,7 +277,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
                 {margin.toFixed(1)}%
               </span>
             ) : (
-              <span className="text-gray-400">—</span>
+              <span className="text-gray-400">--</span>
             )}
           </div>
         </div>
@@ -209,7 +291,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
               min="1"
               value={form.cartonQty ?? ''}
               onChange={e => updateField('cartonQty', e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              className={inputCls}
             />
           </div>
           <div className="space-y-1">
@@ -219,7 +301,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
               min="0"
               value={form.reorderLevel ?? ''}
               onChange={e => updateField('reorderLevel', e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              className={inputCls}
             />
           </div>
         </div>
@@ -232,7 +314,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
               type="text"
               value={form.supplier ?? ''}
               onChange={e => updateField('supplier', e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              className={inputCls}
             />
           </div>
           <div className="space-y-1">
@@ -241,7 +323,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
               type="text"
               value={form.orderCode ?? ''}
               onChange={e => updateField('orderCode', e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+              className={inputCls}
             />
           </div>
         </div>
