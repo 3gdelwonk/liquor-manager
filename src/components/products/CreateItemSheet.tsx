@@ -69,7 +69,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
   }, [form.sellPrice, form.costPrice, form.gst])
 
   async function handleCreate() {
-    if (!form.barcode?.trim() || !form.description?.trim() || !form.department) return
+    if (!form.barcode?.trim() || !form.description?.trim() || !form.department || !(Number(form.sellPrice) > 0)) return
     setBusy(true)
     setError(null)
     try {
@@ -331,7 +331,7 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
         {/* Create button */}
         <button
           onClick={handleCreate}
-          disabled={busy || !form.barcode?.trim() || !form.description?.trim() || !form.department}
+          disabled={busy || !form.barcode?.trim() || !form.description?.trim() || !form.department || !(Number(form.sellPrice) > 0)}
           className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : success ? <CheckCircle size={16} /> : null}
