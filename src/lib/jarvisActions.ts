@@ -15,14 +15,36 @@ export async function changePriceAndSend(
   barcode: string,
   newPrice: number
 ): Promise<{ success: boolean; message?: string }> {
-  return jarvisPost('/api/pos-actions/change-and-send', { barcode, newPrice })
+  const res = await jarvisPost<{
+    ok?: boolean
+    success?: boolean
+    updated?: boolean
+    error?: string
+    message?: string
+    posWarning?: string
+  }>('/api/pos-actions/change-and-send', { barcode, newPrice })
+  return {
+    success: res.ok ?? res.success ?? res.updated ?? false,
+    message: res.message ?? res.error ?? res.posWarning,
+  }
 }
 
 export async function changePriceOnly(
   barcode: string,
   newPrice: number
 ): Promise<{ success: boolean; message?: string }> {
-  return jarvisPut(`/api/pos-actions/price/${encodeURIComponent(barcode)}`, { newPrice })
+  const res = await jarvisPut<{
+    ok?: boolean
+    success?: boolean
+    updated?: boolean
+    error?: string
+    message?: string
+    posWarning?: string
+  }>(`/api/pos-actions/price/${encodeURIComponent(barcode)}`, { newPrice })
+  return {
+    success: res.ok ?? res.success ?? res.updated ?? false,
+    message: res.message ?? res.error ?? res.posWarning,
+  }
 }
 
 export interface SetActiveResult {
@@ -50,13 +72,34 @@ export async function setItemActive(
 export async function sendToPos(
   items: { barcode: string }[]
 ): Promise<{ success: boolean; sent: number; message?: string }> {
-  return jarvisPost('/api/pos-actions/send-to-pos', { items })
+  const res = await jarvisPost<{
+    ok?: boolean
+    success?: boolean
+    sent?: number
+    items?: number
+    error?: string
+    message?: string
+  }>('/api/pos-actions/send-to-pos', { items })
+  return {
+    success: res.ok ?? res.success ?? false,
+    sent:    res.sent ?? res.items ?? 0,
+    message: res.message ?? res.error,
+  }
 }
 
 export async function sendItemToPos(
   barcode: string
 ): Promise<{ success: boolean; message?: string }> {
-  return jarvisPost('/api/pos-actions/send-item-to-pos', { barcode })
+  const res = await jarvisPost<{
+    ok?: boolean
+    success?: boolean
+    error?: string
+    message?: string
+  }>('/api/pos-actions/send-item-to-pos', { barcode })
+  return {
+    success: res.ok ?? res.success ?? false,
+    message: res.message ?? res.error,
+  }
 }
 
 export async function adjustStock(
