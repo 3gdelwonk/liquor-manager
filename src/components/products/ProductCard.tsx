@@ -6,9 +6,10 @@ import {
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
-import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
+import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
-import { flattenLocations, buildLocationTree, formatItemLocation, getDisplayLabel } from '../../lib/locationUtils'
+import { flattenLocations, buildLocationTree, formatItemLocation } from '../../lib/locationUtils'
+import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 
@@ -244,39 +245,21 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
   async function handleAssignHierarchy() {
     setLocBusy(true)
+    let walkerErrored = false
     try {
-      let parentId: number | undefined = undefined
-      let finalId: number | undefined = undefined
-
-      const levels = [
-        { id: zoneId, name: zoneName, code: zoneCode, typeId: 4, setId: (v: number) => { _setZoneId(v); locationMemory.zoneId = v } },
-        { id: aisleId, name: aisleName, code: aisleCode, typeId: 1, setId: (v: number) => { _setAisleId(v); locationMemory.aisleId = v } },
-        { id: bayId, name: bayName, code: bayCode, typeId: 2, setId: (v: number) => { _setBayId(v); locationMemory.bayId = v } },
-        { id: shelfId, name: shelfName, code: shelfCode, typeId: 3, setId: (v: number) => { _setShelfId(v); locationMemory.shelfId = v } },
-      ]
-
-      for (const level of levels) {
-        if (level.id && level.id !== -1) {
-          parentId = Number(level.id)
-          finalId = parentId
-        } else if (level.name.trim() && level.code.trim()) {
-          const res = await createLocation(level.name.trim(), level.code.trim(), level.typeId, parentId)
-          if (!mounted.current) return
-          if (!res.success || !res.id) {
-            flashLocMsg(res.message ?? `Failed to create ${getDisplayLabel(level.typeId)}`)
-            return
-          }
-          parentId = res.id
-          finalId = res.id
-          level.setId(res.id)
-        } else {
-          break
-        }
-      }
-
+      const finalId = await resolveTargetLocation(
+        [
+          { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
+          { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
+          { id: bayId, name: bayName, code: bayCode, typeId: 2 },
+          { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
+        ],
+        (msg) => { walkerErrored = true; if (mounted.current) flashLocMsg(msg) },
+      )
+      if (!mounted.current) return
       if (!finalId) {
-        flashLocMsg('Select or enter at least one location level')
-        if (mounted.current) setLocBusy(false)
+        if (!walkerErrored) flashLocMsg('Select or enter at least one location level')
+        setLocBusy(false)
         return
       }
 
@@ -772,56 +755,64 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     </div>
                   )}
 
-                  {/* Cascading location fields */}
+                  {/* Cascading location fields — all 4 levels always visible, gap-skipping allowed */}
                   <div className="space-y-2">
                     <p className="text-[10px] font-semibold text-blue-500 uppercase">Assign Location</p>
-                    <LocationLevelRow
-                      label="Zone"
-                      options={zones}
-                      selectedId={zoneId}
-                      newName={zoneName}
-                      newCode={zoneCode}
-                      onSelectId={(id) => setZone(id, '', '')}
-                      onNewName={(v) => { _setZoneName(v); locationMemory.zoneName = v }}
-                      onNewCode={(v) => { _setZoneCode(v); locationMemory.zoneCode = v }}
-                      busy={locBusy}
-                    />
-                    <LocationLevelRow
-                      label="Aisle"
-                      options={aisles}
-                      selectedId={aisleId}
-                      newName={aisleName}
-                      newCode={aisleCode}
-                      onSelectId={(id) => setAisle(id, '', '')}
-                      onNewName={(v) => { _setAisleName(v); locationMemory.aisleName = v }}
-                      onNewCode={(v) => { _setAisleCode(v); locationMemory.aisleCode = v }}
-                      busy={locBusy}
-                    />
-                    <LocationLevelRow
-                      label="Bay"
-                      options={bays}
-                      selectedId={bayId}
-                      newName={bayName}
-                      newCode={bayCode}
-                      onSelectId={(id) => setBay(id, '', '')}
-                      onNewName={(v) => { _setBayName(v); locationMemory.bayName = v }}
-                      onNewCode={(v) => { _setBayCode(v); locationMemory.bayCode = v }}
-                      busy={locBusy}
-                    />
-                    <LocationLevelRow
-                      label="Shelf"
-                      options={shelves}
-                      selectedId={shelfId}
-                      newName={shelfName}
-                      newCode={shelfCode}
-                      onSelectId={(id) => setShelf(id, '', '')}
-                      onNewName={(v) => { _setShelfName(v); locationMemory.shelfName = v }}
-                      onNewCode={(v) => { _setShelfCode(v); locationMemory.shelfCode = v }}
-                      busy={locBusy}
-                    />
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <LocationLevelColumn
+                        label="Zone"
+                        options={zones}
+                        selectedId={zoneId}
+                        name={zoneName}
+                        code={zoneCode}
+                        onSelectId={(id) => setZone(id, '', '')}
+                        onName={(v) => { _setZoneName(v); locationMemory.zoneName = v }}
+                        onCode={(v) => { _setZoneCode(v); locationMemory.zoneCode = v }}
+                        busy={locBusy}
+                      />
+                      <LocationLevelColumn
+                        label="Aisle"
+                        options={aisles}
+                        selectedId={aisleId}
+                        name={aisleName}
+                        code={aisleCode}
+                        onSelectId={(id) => setAisle(id, '', '')}
+                        onName={(v) => { _setAisleName(v); locationMemory.aisleName = v }}
+                        onCode={(v) => { _setAisleCode(v); locationMemory.aisleCode = v }}
+                        busy={locBusy}
+                      />
+                      <LocationLevelColumn
+                        label="Bay"
+                        options={bays}
+                        selectedId={bayId}
+                        name={bayName}
+                        code={bayCode}
+                        onSelectId={(id) => setBay(id, '', '')}
+                        onName={(v) => { _setBayName(v); locationMemory.bayName = v }}
+                        onCode={(v) => { _setBayCode(v); locationMemory.bayCode = v }}
+                        busy={locBusy}
+                      />
+                      <LocationLevelColumn
+                        label="Row"
+                        options={shelves}
+                        selectedId={shelfId}
+                        name={shelfName}
+                        code={shelfCode}
+                        onSelectId={(id) => setShelf(id, '', '')}
+                        onName={(v) => { _setShelfName(v); locationMemory.shelfName = v }}
+                        onCode={(v) => { _setShelfCode(v); locationMemory.shelfCode = v }}
+                        busy={locBusy}
+                      />
+                    </div>
+
                     <button
                       onClick={(e) => { e.stopPropagation(); handleAssignHierarchy() }}
-                      disabled={locBusy || ((!zoneId || zoneId === -1) && !zoneName.trim() && (!aisleId || aisleId === -1) && !aisleName.trim() && (!bayId || bayId === -1) && !bayName.trim() && (!shelfId || shelfId === -1) && !shelfName.trim())}
+                      disabled={locBusy || !hasAnyCascadeInput([
+                        { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
+                        { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
+                        { id: bayId, name: bayName, code: bayCode, typeId: 2 },
+                        { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
+                      ])}
                       className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
                       {locBusy ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}
@@ -1069,72 +1060,3 @@ function AdjustStockSheet({ item, onClose, onSuccess }: {
   )
 }
 
-function LocationLevelRow({ label, options, selectedId, newName, newCode, onSelectId, onNewName, onNewCode, busy }: {
-  label: string
-  options: { id: number; name: string; shortCode: string; path: string }[]
-  selectedId: number | ''
-  newName: string
-  newCode: string
-  onSelectId: (id: number | '') => void
-  onNewName: (v: string) => void
-  onNewCode: (v: string) => void
-  busy: boolean
-}) {
-  const showNewInputs = selectedId === -1
-
-  return (
-    <div className="space-y-1">
-      <label className="text-[10px] font-semibold text-blue-400 uppercase">{label}</label>
-      <div className="flex gap-1.5">
-        <select
-          value={selectedId || ''}
-          onChange={e => {
-            const v = Number(e.target.value)
-            if (v === -1) {
-              onSelectId(-1)
-            } else if (v > 0) {
-              onSelectId(v)
-              onNewName('')
-              onNewCode('')
-            } else {
-              onSelectId('')
-              onNewName('')
-              onNewCode('')
-            }
-          }}
-          onClick={e => e.stopPropagation()}
-          disabled={busy}
-          className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
-        >
-          <option value="">—</option>
-          {options.map(o => (
-            <option key={o.id} value={o.id}>{o.name} ({o.shortCode})</option>
-          ))}
-          <option value={-1}>+ New {label}...</option>
-        </select>
-        {showNewInputs && (
-          <>
-            <input
-              type="text"
-              value={newName}
-              onChange={e => onNewName(e.target.value)}
-              onClick={e => e.stopPropagation()}
-              placeholder="Name"
-              disabled={busy}
-              className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
-            />
-            <input
-              type="text"
-              value={newCode}
-              onChange={e => onNewCode(e.target.value)}
-              onClick={e => e.stopPropagation()}
-              placeholder="Code"
-              disabled={busy}
-              className="w-16 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
-            />
-          </>
-        )}
-      </div>
-    </div>
-  )
-}

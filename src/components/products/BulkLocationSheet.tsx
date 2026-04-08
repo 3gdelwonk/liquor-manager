@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { Search, X, Loader2, CheckCircle, MapPin, Plus, ScanBarcode } from 'lucide-react'
-import type { StockItem, StockLocation, LocationType } from '../../lib/jarvis'
-import { getLocations, getLocationTypes } from '../../lib/jarvis'
-import { bulkAssignLocation, createLocation } from '../../lib/jarvisActions'
-import { flattenLocations, buildLocationTree, getTypeLabel } from '../../lib/locationUtils'
+import { Search, X, Loader2, CheckCircle, MapPin, ScanBarcode } from 'lucide-react'
+import type { StockItem, StockLocation } from '../../lib/jarvis'
+import { getLocations } from '../../lib/jarvis'
+import { bulkAssignLocation } from '../../lib/jarvisActions'
+import { flattenLocations, buildLocationTree } from '../../lib/locationUtils'
+import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
 import BarcodeScanner from '../BarcodeScanner'
 
 interface BulkLocationSheetProps {
@@ -15,16 +16,41 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   const [search, setSearch] = useState('')
   const [entries, setEntries] = useState<StockItem[]>([])
   const [locations, setLocations] = useState<StockLocation[]>([])
-  const [locationTypes, setLocationTypes] = useState<LocationType[]>([])
   const [locLoading, setLocLoading] = useState(true)
-  const [selectedLocId, setSelectedLocId] = useState<number | ''>('')
 
-  // Create new location fields
-  const [newLocName, setNewLocName] = useState('')
-  const [newLocCode, setNewLocCode] = useState('')
-  const [newLocTypeId, setNewLocTypeId] = useState<number>(2)
-  const [newLocParentId, setNewLocParentId] = useState<number | ''>('')
-  const [createBusy, setCreateBusy] = useState(false)
+  // Cascading location fields
+  const [zoneId, setZoneId] = useState<number | ''>('')
+  const [zoneName, setZoneName] = useState('')
+  const [zoneCode, setZoneCode] = useState('')
+  const [aisleId, setAisleId] = useState<number | ''>('')
+  const [aisleName, setAisleName] = useState('')
+  const [aisleCode, setAisleCode] = useState('')
+  const [bayId, setBayId] = useState<number | ''>('')
+  const [bayName, setBayName] = useState('')
+  const [bayCode, setBayCode] = useState('')
+  const [shelfId, setShelfId] = useState<number | ''>('')
+  const [shelfName, setShelfName] = useState('')
+  const [shelfCode, setShelfCode] = useState('')
+
+  // Cascade clearing — picking a level resets all descendants
+  function pickZone(id: number | '') {
+    setZoneId(id); setZoneName(''); setZoneCode('')
+    setAisleId(''); setAisleName(''); setAisleCode('')
+    setBayId(''); setBayName(''); setBayCode('')
+    setShelfId(''); setShelfName(''); setShelfCode('')
+  }
+  function pickAisle(id: number | '') {
+    setAisleId(id); setAisleName(''); setAisleCode('')
+    setBayId(''); setBayName(''); setBayCode('')
+    setShelfId(''); setShelfName(''); setShelfCode('')
+  }
+  function pickBay(id: number | '') {
+    setBayId(id); setBayName(''); setBayCode('')
+    setShelfId(''); setShelfName(''); setShelfCode('')
+  }
+  function pickShelf(id: number | '') {
+    setShelfId(id); setShelfName(''); setShelfCode('')
+  }
 
   const [processing, setProcessing] = useState(false)
   const [result, setResult] = useState<{ ok: number; failed: number; message: string } | null>(null)
@@ -41,11 +67,25 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     return map
   }, [items])
 
-  // Flatten locations for dropdown
+  // Flatten locations and derive cascading per-level lists
   const flatLocs = useMemo(() => {
     const tree = buildLocationTree(locations)
     return flattenLocations(tree)
   }, [locations])
+
+  const zones = useMemo(() => flatLocs.filter(l => l.typeId === 4), [flatLocs])
+  const aisles = useMemo(() => {
+    const all = flatLocs.filter(l => l.typeId === 1)
+    return zoneId ? all.filter(l => l.parentId === zoneId) : all
+  }, [flatLocs, zoneId])
+  const bays = useMemo(() => {
+    const all = flatLocs.filter(l => l.typeId === 2)
+    return aisleId ? all.filter(l => l.parentId === aisleId) : all
+  }, [flatLocs, aisleId])
+  const shelves = useMemo(() => {
+    const all = flatLocs.filter(l => l.typeId === 3)
+    return bayId ? all.filter(l => l.parentId === bayId) : all
+  }, [flatLocs, bayId])
 
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
@@ -62,11 +102,8 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   }, [search, items, addedCodes])
 
   useEffect(() => {
-    Promise.all([getLocations(), getLocationTypes()])
-      .then(([all, types]) => {
-        setLocations(all.filter(l => l.active))
-        setLocationTypes(types)
-      })
+    getLocations()
+      .then(all => setLocations(all.filter(l => l.active)))
       .catch(() => setError('Failed to load locations'))
       .finally(() => setLocLoading(false))
   }, [])
@@ -81,42 +118,33 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     }
   }, [barcodeMap, addedCodes])
 
-  async function handleCreateLocation() {
-    if (!newLocName.trim() || !newLocCode.trim()) return
-    setCreateBusy(true)
-    setError(null)
-    try {
-      const res = await createLocation(
-        newLocName.trim(),
-        newLocCode.trim(),
-        newLocTypeId,
-        newLocParentId ? Number(newLocParentId) : undefined,
-      )
-      if (res.success && res.id) {
-        const updated = await getLocations()
-        setLocations(updated.filter(l => l.active))
-        setSelectedLocId(res.id)
-        setNewLocName(''); setNewLocCode(''); setNewLocParentId('')
-      } else {
-        setError(res.message ?? 'Failed to create location')
-      }
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setCreateBusy(false)
-    }
-  }
-
   async function handleAssignAll() {
-    if (!selectedLocId || entries.length === 0) return
+    if (entries.length === 0) return
     setProcessing(true)
     setError(null)
     setResult(null)
+    let walkerErrored = false
     try {
-      const res = await bulkAssignLocation(
-        Number(selectedLocId),
-        entries.map(e => e.itemCode)
+      const targetId = await resolveTargetLocation(
+        [
+          { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
+          { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
+          { id: bayId, name: bayName, code: bayCode, typeId: 2 },
+          { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
+        ],
+        (msg) => { walkerErrored = true; setError(msg) },
       )
+      if (!targetId) {
+        if (!walkerErrored) setError('Select or create at least one location level')
+        setProcessing(false)
+        return
+      }
+
+      // Reload locations so any newly-created levels are reflected in the dropdowns
+      const updated = await getLocations()
+      setLocations(updated.filter(l => l.active))
+
+      const res = await bulkAssignLocation(targetId, entries.map(e => e.itemCode))
       if (res.success) {
         setResult({
           ok: res.assigned ?? entries.length,
@@ -133,7 +161,13 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     }
   }
 
-  const selectedLoc = flatLocs.find(l => l.id === selectedLocId)
+  const cascadeLevels = [
+    { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
+    { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
+    { id: bayId, name: bayName, code: bayCode, typeId: 2 },
+    { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
+  ]
+  const hasAnyLevel = hasAnyCascadeInput(cascadeLevels)
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -145,98 +179,62 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
           <button onClick={onClose} className="text-gray-400 text-lg leading-none">✕</button>
         </div>
 
-        {/* Location selection + creation */}
+        {/* Cascading location selection */}
         <div className="px-4 pt-3 pb-3 border-b border-gray-100 shrink-0 space-y-2.5">
           {locLoading ? (
             <div className="flex items-center gap-2 text-xs text-gray-400">
               <Loader2 size={14} className="animate-spin" /> Loading locations...
             </div>
           ) : (
-            <>
-              {/* Select existing */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-500 uppercase">Target Location</label>
-                <select
-                  value={selectedLocId}
-                  onChange={e => setSelectedLocId(e.target.value ? Number(e.target.value) : '')}
-                  disabled={processing}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-                >
-                  <option value="">Select location...</option>
-                  {flatLocs.map(l => (
-                    <option key={l.id} value={l.id}>
-                      {l.path} ({getTypeLabel(l.typeId, l.typeName)})
-                    </option>
-                  ))}
-                </select>
+            <div className="bg-blue-50 rounded-lg p-3 space-y-2">
+              <p className="text-[10px] font-semibold text-blue-500 uppercase">Target Location</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                <LocationLevelColumn
+                  label="Zone"
+                  options={zones}
+                  selectedId={zoneId}
+                  name={zoneName}
+                  code={zoneCode}
+                  onSelectId={pickZone}
+                  onName={setZoneName}
+                  onCode={setZoneCode}
+                  busy={processing}
+                />
+                <LocationLevelColumn
+                  label="Aisle"
+                  options={aisles}
+                  selectedId={aisleId}
+                  name={aisleName}
+                  code={aisleCode}
+                  onSelectId={pickAisle}
+                  onName={setAisleName}
+                  onCode={setAisleCode}
+                  busy={processing}
+                />
+                <LocationLevelColumn
+                  label="Bay"
+                  options={bays}
+                  selectedId={bayId}
+                  name={bayName}
+                  code={bayCode}
+                  onSelectId={pickBay}
+                  onName={setBayName}
+                  onCode={setBayCode}
+                  busy={processing}
+                />
+                <LocationLevelColumn
+                  label="Row"
+                  options={shelves}
+                  selectedId={shelfId}
+                  name={shelfName}
+                  code={shelfCode}
+                  onSelectId={pickShelf}
+                  onName={setShelfName}
+                  onCode={setShelfCode}
+                  busy={processing}
+                />
               </div>
-
-              {selectedLoc && (
-                <p className="text-xs text-blue-600 font-medium px-1">
-                  <MapPin size={10} className="inline" /> {selectedLoc.path}
-                </p>
-              )}
-
-              {/* Or create new — always visible */}
-              <div className="bg-blue-50 rounded-lg p-3 space-y-2">
-                <p className="text-[10px] font-semibold text-blue-500 uppercase flex items-center gap-1"><Plus size={10} /> Or Create New Location</p>
-                <div className="flex gap-1.5">
-                  <select
-                    value={newLocTypeId}
-                    onChange={e => setNewLocTypeId(Number(e.target.value))}
-                    disabled={processing}
-                    className="w-20 border border-blue-200 rounded-lg px-1.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                  >
-                    {locationTypes.length > 0 ? locationTypes.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    )) : (
-                      <>
-                        <option value={4}>Zone</option>
-                        <option value={1}>Aisle</option>
-                        <option value={2}>Bay</option>
-                        <option value={3}>Row</option>
-                      </>
-                    )}
-                  </select>
-                  <input
-                    type="text"
-                    value={newLocName}
-                    onChange={e => setNewLocName(e.target.value)}
-                    placeholder="Name"
-                    disabled={processing}
-                    className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                  />
-                  <input
-                    type="text"
-                    value={newLocCode}
-                    onChange={e => setNewLocCode(e.target.value)}
-                    placeholder="Short code"
-                    disabled={processing}
-                    className="w-20 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                  />
-                </div>
-                <div className="flex gap-1.5">
-                  <select
-                    value={newLocParentId}
-                    onChange={e => setNewLocParentId(e.target.value ? Number(e.target.value) : '')}
-                    disabled={processing}
-                    className="flex-1 border border-blue-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-300"
-                  >
-                    <option value="">No parent (top level)</option>
-                    {flatLocs.map(l => (
-                      <option key={l.id} value={l.id}>{l.path}</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={handleCreateLocation}
-                    disabled={createBusy || !newLocName.trim() || !newLocCode.trim() || processing}
-                    className="px-2.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
-                  >
-                    {createBusy ? <Loader2 size={12} className="animate-spin" /> : 'Create'}
-                  </button>
-                </div>
-              </div>
-            </>
+            </div>
           )}
         </div>
 
@@ -328,7 +326,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
           ) : (
             <button
               onClick={handleAssignAll}
-              disabled={processing || entries.length === 0 || !selectedLocId}
+              disabled={processing || entries.length === 0 || !hasAnyLevel}
               className="w-full py-3 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {processing ? (
@@ -347,3 +345,4 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     </div>
   )
 }
+
