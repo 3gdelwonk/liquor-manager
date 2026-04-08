@@ -712,6 +712,37 @@ export async function getDepartmentList(): Promise<Department[]> {
   })).filter(d => d.name !== '');
 }
 
+// ── Suppliers (for item creation) ───────────────────────────────────────────
+
+export interface SupplierPreset {
+  key: 'store' | 'metcash' | 'alm' | string;
+  supplierId: number;
+  supplierName: string;
+  discoveredVendorId: number;
+  usable: boolean;
+  isHosted: boolean;
+  defaultItemType: string;
+  itemCount: number;
+  label: string;
+  useFor: string;
+  isDefault: boolean;
+}
+
+export interface SupplierListResponse {
+  defaultSupplierId: number;
+  presets: SupplierPreset[];
+}
+
+export async function getSuppliers(): Promise<SupplierListResponse> {
+  const raw = await jarvisFetch<{ ok?: boolean; defaultSupplierId?: number; presets?: SupplierPreset[] }>(
+    '/api/pos-actions/suppliers'
+  );
+  return {
+    defaultSupplierId: raw.defaultSupplierId ?? 18629,
+    presets: raw.presets ?? [],
+  };
+}
+
 // ── Printers & Label Queue ──────────────────────────────────────────────────
 
 export interface Printer {

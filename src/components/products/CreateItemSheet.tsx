@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Loader2, CheckCircle, ScanBarcode } from 'lucide-react'
-import { getDepartmentList, LIQUOR_DEPT_CODES, type Department } from '../../lib/jarvis'
+import { getDepartmentList, getSuppliers, LIQUOR_DEPT_CODES, type Department, type SupplierPreset } from '../../lib/jarvis'
 import { createItem, type CreateItemPayload } from '../../lib/jarvisActions'
 import { addNewItem } from '../../lib/pendingPosChanges'
 import BarcodeScanner from '../BarcodeScanner'
@@ -22,6 +22,8 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
     reorderLevel: 1,
   })
   const [departments, setDepartments] = useState<Department[]>([])
+  const [supplierPresets, setSupplierPresets] = useState<SupplierPreset[]>([])
+  const [supplierId, setSupplierId] = useState<number | null>(null)
   const [scannerOpen, setScannerOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -42,6 +44,22 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
           { code: 23, name: 'LIQUOR/MISC' },
           { code: 25, name: 'BEER' },
         ])
+      })
+  }, [])
+
+  // Load supplier presets once; pre-select the default (STORE SUPPLIER 18629)
+  useEffect(() => {
+    getSuppliers()
+      .then(res => {
+        setSupplierPresets(res.presets)
+        const def = res.presets.find(p => p.isDefault) ?? res.presets[0]
+        if (def) setSupplierId(def.supplierId)
+        else setSupplierId(res.defaultSupplierId)
+      })
+      .catch(() => {
+        // Fallback: STORE SUPPLIER known default
+        setSupplierPresets([])
+        setSupplierId(18629)
       })
   }, [])
 
@@ -75,13 +93,16 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
     setError(null)
     try {
       const selectedDept = departments.find(d => d.name === form.department)
+      const costNum = Number(form.costPrice) || 0
       const res = await createItem({
         barcode: form.barcode.trim(),
         description: form.description.trim(),
         department: form.department,
         departmentCode: selectedDept?.code,
         sellPrice: Number(form.sellPrice) || 0,
-        costPrice: Number(form.costPrice) || 0,
+        costPrice: costNum,
+        initialCost: costNum,
+        supplierId: supplierId ?? undefined,
         gst: form.gst ?? true,
         cartonQty: form.cartonQty ? Number(form.cartonQty) : undefined,
         reorderLevel: Number(form.reorderLevel) || 1,
@@ -170,6 +191,49 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
           </select>
           {departments.length === 0 && (
             <p className="text-xs text-amber-600">Loading departments...</p>
+          )}
+        </div>
+
+        {/* Supplier */}
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-gray-700">Supplier</label>
+          {supplierPresets.length === 0 ? (
+            <p className="text-xs text-amber-600">Loading suppliers...</p>
+          ) : (
+            <div className="space-y-1.5">
+              {supplierPresets.map(p => {
+                const active = supplierId === p.supplierId
+                return (
+                  <button
+                    type="button"
+                    key={p.supplierId}
+                    onClick={() => setSupplierId(p.supplierId)}
+                    className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                      active
+                        ? 'border-violet-400 bg-violet-50'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-semibold ${active ? 'text-violet-700' : 'text-gray-800'}`}>
+                        {p.label}
+                      </span>
+                      {p.isHosted && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                          HOSTED
+                        </span>
+                      )}
+                      {p.isDefault && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                          DEFAULT
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-0.5">{p.useFor}</p>
+                  </button>
+                )
+              })}
+            </div>
           )}
         </div>
 

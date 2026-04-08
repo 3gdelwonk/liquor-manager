@@ -154,6 +154,10 @@ export interface CreateItemPayload {
   departmentCode?: number
   sellPrice: number
   costPrice: number
+  // Server expects `initialCost` — we send both (initialCost first) to be robust
+  initialCost?: number
+  // Supplier selection — server defaults to STORE (18629) when omitted
+  supplierId?: number
   gst?: boolean
   cartonQty?: number
   reorderLevel?: number
