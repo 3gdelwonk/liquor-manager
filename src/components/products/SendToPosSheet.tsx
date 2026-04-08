@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   Send, X, Loader2, CheckCircle, AlertCircle, Pencil, Check,
-  DollarSign, Tag, Wifi, WifiOff, Power, PowerOff, PackagePlus,
+  DollarSign, Tag, Wifi, WifiOff, Power, PowerOff, PackagePlus, RefreshCw,
 } from 'lucide-react'
 import type { CloudStatus } from '../../lib/jarvis'
 import { getCloudStatus } from '../../lib/jarvis'
@@ -12,6 +12,7 @@ import {
   removePromoChange,
   removeActiveChange,
   removeNewItem,
+  removeSyncItem,
   updatePriceChange,
   updatePromoChange,
   clearAll,
@@ -72,7 +73,8 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
     state.priceChanges.length +
     state.promoChanges.length +
     state.activeChanges.length +
-    state.newItems.length
+    state.newItems.length +
+    state.syncItems.length
   const isConnected = cloud?.loggedIn === true
 
   // Start editing a price
@@ -119,6 +121,7 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
     for (const c of state.promoChanges)  barcodeSet.add(c.barcode)
     for (const c of state.activeChanges) barcodeSet.add(c.barcode)
     for (const c of state.newItems)      if (c.barcode) barcodeSet.add(c.barcode)
+    for (const c of state.syncItems)     if (c.barcode) barcodeSet.add(c.barcode)
     const items = [...barcodeSet].map(barcode => ({ barcode }))
 
     setSending(true)
@@ -160,6 +163,7 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
                   state.promoChanges.length  > 0 && `${state.promoChanges.length} promo`,
                   state.activeChanges.length > 0 && `${state.activeChanges.length} active`,
                   state.newItems.length      > 0 && `${state.newItems.length} new`,
+                  state.syncItems.length     > 0 && `${state.syncItems.length} sync`,
                 ].filter(Boolean).join(' · ')}
               </p>
             )}
@@ -342,6 +346,34 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
                       <div className="flex items-center gap-3 text-[10px] text-gray-300 font-mono">
                         <span>{c.barcode}</span>
                         {c.itemCode && <span>{c.itemCode}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Sync Items (generic "apply change" queue) */}
+              {state.syncItems.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <RefreshCw size={12} /> Queued for Sync ({state.syncItems.length})
+                  </div>
+                  {state.syncItems.map(c => (
+                    <div key={c.id} className="border border-gray-200 rounded-lg p-3 space-y-1 bg-gray-50/60">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-800 truncate flex-1">{c.description}</p>
+                        <button
+                          onClick={() => removeSyncItem(c.id)}
+                          disabled={sending}
+                          className="text-gray-300 hover:text-red-500 shrink-0 disabled:opacity-50"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-gray-400 font-mono">
+                        <span>{c.barcode}</span>
+                        {c.itemCode && <span>{c.itemCode}</span>}
+                        <span className="ml-auto font-sans text-gray-300">{timeAgo(c.timestamp)}</span>
                       </div>
                     </div>
                   ))}

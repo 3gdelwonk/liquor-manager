@@ -46,11 +46,23 @@ export interface PendingNewItem {
   timestamp: number
 }
 
+// A generic "queue this barcode for the next POS send" entry — used when the user
+// clicks Apply Change on an item that has no specific edit (price/promo/active),
+// or for reconciliation (e.g. items that exist in DB but haven't shipped to terminals).
+export interface PendingSyncItem {
+  id: string
+  barcode: string
+  itemCode: string
+  description: string
+  timestamp: number
+}
+
 export interface PendingPosState {
   priceChanges: PendingPriceChange[]
   promoChanges: PendingPromoChange[]
   activeChanges: PendingActiveChange[]
   newItems: PendingNewItem[]
+  syncItems: PendingSyncItem[]
 }
 
 // ── Module-level store ─────────────────────────────────────────────────────────
@@ -60,7 +72,13 @@ let listeners: Array<() => void> = []
 let state: PendingPosState = loadFromStorage()
 
 function emptyState(): PendingPosState {
-  return { priceChanges: [], promoChanges: [], activeChanges: [], newItems: [] }
+  return {
+    priceChanges:  [],
+    promoChanges:  [],
+    activeChanges: [],
+    newItems:      [],
+    syncItems:     [],
+  }
 }
 
 function loadFromStorage(): PendingPosState {
@@ -74,6 +92,7 @@ function loadFromStorage(): PendingPosState {
         promoChanges:  parsed.promoChanges  ?? [],
         activeChanges: parsed.activeChanges ?? [],
         newItems:      parsed.newItems      ?? [],
+        syncItems:     parsed.syncItems     ?? [],
       }
     }
   } catch { /* ignore */ }
@@ -176,6 +195,38 @@ export function removeNewItem(id: string) {
   emit()
 }
 
+// ── Mutations: generic sync queue ─────────────────────────────────────────────
+
+export function addSyncItem(item: Omit<PendingSyncItem, 'id' | 'timestamp'>) {
+  // Dedup by barcode — if the barcode is already tracked by any other queue,
+  // skip adding a sync entry (the existing entry will carry it into the batch).
+  const alreadyQueued =
+    state.priceChanges.some(c => c.barcode === item.barcode) ||
+    state.promoChanges.some(c => c.barcode === item.barcode) ||
+    state.activeChanges.some(c => c.barcode === item.barcode) ||
+    state.newItems.some(c => c.barcode === item.barcode)
+  if (alreadyQueued) {
+    // Refresh timestamp on any existing sync entry but don't duplicate
+    state = {
+      ...state,
+      syncItems: state.syncItems.filter(c => c.barcode !== item.barcode),
+    }
+    emit()
+    return
+  }
+  const filtered = state.syncItems.filter(c => c.barcode !== item.barcode)
+  state = {
+    ...state,
+    syncItems: [...filtered, { ...item, id: crypto.randomUUID(), timestamp: Date.now() }],
+  }
+  emit()
+}
+
+export function removeSyncItem(id: string) {
+  state = { ...state, syncItems: state.syncItems.filter(c => c.id !== id) }
+  emit()
+}
+
 // ── Mutations: cross-cutting ──────────────────────────────────────────────────
 
 export function removeByBarcode(barcode: string) {
@@ -184,6 +235,7 @@ export function removeByBarcode(barcode: string) {
     promoChanges:  state.promoChanges.filter(c => c.barcode !== barcode),
     activeChanges: state.activeChanges.filter(c => c.barcode !== barcode),
     newItems:      state.newItems.filter(c => c.barcode !== barcode),
+    syncItems:     state.syncItems.filter(c => c.barcode !== barcode),
   }
   emit()
 }
@@ -210,5 +262,11 @@ export function usePendingPosChanges(): PendingPosState {
 
 export function usePendingCount(): number {
   const s = useSyncExternalStore(subscribe, getSnapshot)
-  return s.priceChanges.length + s.promoChanges.length + s.activeChanges.length + s.newItems.length
+  return (
+    s.priceChanges.length +
+    s.promoChanges.length +
+    s.activeChanges.length +
+    s.newItems.length +
+    s.syncItems.length
+  )
 }

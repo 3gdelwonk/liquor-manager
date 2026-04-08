@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, memo, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
-  Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
+  Printer, Check, Loader2, Calendar, RefreshCw, Lock, Unlock,
   Box, Truck, Trash2, Power, PowerOff,
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
-import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment, setItemActive } from '../../lib/jarvisActions'
-import { removeByBarcode, addActiveChange } from '../../lib/pendingPosChanges'
+import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment, setItemActive } from '../../lib/jarvisActions'
+import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, formatItemLocation, getDisplayLabel } from '../../lib/locationUtils'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
@@ -166,7 +166,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   }
 
   // Direct action states
-  const [sendBusy, setSendBusy] = useState(false)
+  const [applyBusy, setApplyBusy] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
   const msgTimer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -340,17 +340,31 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }
   }
 
-  async function handleSendToPos() {
+  // Apply Change: writes the current client-side state to the database (idempotent
+  // price reconcile via SOAP), then queues the item for the next Send to POS batch.
+  // The FAB Send to POS picks up every queued item — price changes, promos,
+  // active toggles, new items, and these sync entries — and pushes them to the
+  // POS terminals in one go.
+  async function handleApplyChange() {
     if (!item.barcode) return
-    setSendBusy(true)
+    setApplyBusy(true)
     try {
-      const res = await sendItemToPos(item.barcode)
-      if (res.success) removeByBarcode(item.barcode)
-      if (mounted.current) flashMsg(res.success ? 'Sent to POS' : (res.message ?? 'Failed'))
+      const res = await changePriceOnly(item.barcode, item.sellPrice)
+      if (!mounted.current) return
+      if (res.success) {
+        addSyncItem({
+          barcode: item.barcode,
+          itemCode: item.itemCode,
+          description: item.description,
+        })
+        flashMsg('Applied to DB — queued for POS')
+      } else {
+        flashMsg(res.message ?? 'Failed')
+      }
     } catch (err) {
       if (mounted.current) flashMsg((err as Error).message)
     } finally {
-      if (mounted.current) setSendBusy(false)
+      if (mounted.current) setApplyBusy(false)
     }
   }
 
@@ -736,7 +750,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
             </div>
           )}
 
-          {/* Active toggle + Send to POS Now — secondary actions */}
+          {/* Active toggle + Apply Change — secondary actions */}
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={(e) => { e.stopPropagation(); handleToggleActive() }}
@@ -755,12 +769,13 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
               </span>
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); handleSendToPos() }}
-              disabled={sendBusy || !item.barcode}
-              className="flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+              onClick={(e) => { e.stopPropagation(); handleApplyChange() }}
+              disabled={applyBusy || !item.barcode}
+              className="flex items-center justify-center gap-2 py-2 rounded-lg border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors disabled:opacity-50"
+              title="Write current state to the database and queue this item for the next Send to POS batch"
             >
-              {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              <span className="text-xs font-medium">Send to POS Now</span>
+              {applyBusy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              <span className="text-xs font-medium">Apply Change</span>
             </button>
           </div>
 
