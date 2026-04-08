@@ -219,6 +219,13 @@ export default function ProductsView() {
     ))
   }, [])
 
+  // Change department on a product (optimistic update after successful DB write)
+  const updateItemDepartment = useCallback((itemCode: string, departmentCode: number, department: string) => {
+    setItems(prev => prev.map(i =>
+      i.itemCode === itemCode ? { ...i, departmentCode, department } : i
+    ))
+  }, [])
+
   // Apply filters + sort
   const displayed = useMemo(() => {
     let list = items
@@ -470,6 +477,7 @@ export default function ProductsView() {
             onRefresh={() => refreshItem(item.itemCode)}
             onToggleLock={(locked) => toggleItemLock(item.itemCode, locked)}
             onToggleActive={(active) => updateItemActive(item.itemCode, active)}
+            onChangeDepartment={(code, name) => updateItemDepartment(item.itemCode, code, name)}
           />
         ))}
         {displayLimit < displayed.length && (

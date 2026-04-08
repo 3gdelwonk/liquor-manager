@@ -97,9 +97,10 @@ interface ProductCardProps {
   onRefresh?: () => Promise<void>
   onToggleLock?: (locked: boolean) => void
   onToggleActive?: (active: boolean) => void
+  onChangeDepartment?: (departmentCode: number, department: string) => void
 }
 
-function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock, onToggleActive }: ProductCardProps) {
+function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock, onToggleActive, onChangeDepartment }: ProductCardProps) {
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -327,9 +328,16 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
       const res = await changeDepartment(item.barcode, dept.code, dept.name)
       if (!mounted.current) return
       if (res.success) {
-        flashMsg(`Department → ${dept.name}`)
+        // Optimistic client update so the card reflects DB state immediately
+        onChangeDepartment?.(dept.code, dept.name)
+        // Queue for POS terminal sync so the FAB batch picks it up
+        addSyncItem({
+          barcode: item.barcode,
+          itemCode: item.itemCode,
+          description: item.description,
+        })
+        flashMsg(`Department → ${dept.name} — queued for POS`)
         setShowDeptPanel(false)
-        onRefresh?.()
       } else {
         flashMsg(res.message ?? 'Failed to change department')
       }
