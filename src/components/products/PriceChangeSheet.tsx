@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { DollarSign, Loader2, CheckCircle, Send, Lock } from 'lucide-react'
+import { DollarSign, Loader2, CheckCircle, Lock } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { setPriceLockLocal } from '../../lib/jarvis'
-import { changePriceAndSend, changePriceOnly, togglePriceLock } from '../../lib/jarvisActions'
+import { changePriceOnly, togglePriceLock } from '../../lib/jarvisActions'
+import { addPriceChange } from '../../lib/pendingPosChanges'
 
 interface PriceChangeSheetProps {
   item: StockItem
@@ -16,7 +17,6 @@ function fmtMoney(n: number) {
 
 export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChangeSheetProps) {
   const [newPrice, setNewPrice] = useState(item.sellPrice.toFixed(2))
-  const [sendToPos, setSendToPos] = useState(true)
   const [lockPrice, setLockPrice] = useState(item.priceLocked)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -35,10 +35,15 @@ export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChan
     setBusy(true)
     setError(null)
     try {
-      const res = sendToPos
-        ? await changePriceAndSend(item.barcode, price)
-        : await changePriceOnly(item.barcode, price)
+      const res = await changePriceOnly(item.barcode, price)
       if (res.success) {
+        addPriceChange({
+          barcode: item.barcode!,
+          itemCode: item.itemCode,
+          description: item.description,
+          oldPrice: item.sellPrice,
+          newPrice: price,
+        })
         // Lock/unlock price if toggle changed
         if (lockPrice !== item.priceLocked && item.barcode) {
           togglePriceLock(item.barcode, lockPrice).catch(() => {})
@@ -112,22 +117,6 @@ export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChan
             <div className="relative">
               <input
                 type="checkbox"
-                checked={sendToPos}
-                onChange={e => setSendToPos(e.target.checked)}
-                className="sr-only"
-              />
-              <div className={`w-10 h-5 rounded-full transition-colors ${sendToPos ? 'bg-violet-600' : 'bg-gray-300'}`} />
-              <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${sendToPos ? 'translate-x-5' : ''}`} />
-            </div>
-            <div className="flex items-center gap-1.5 text-sm text-gray-700">
-              <Send size={14} />
-              Send to POS terminal
-            </div>
-          </label>
-          <label className="flex items-center gap-3 cursor-pointer">
-            <div className="relative">
-              <input
-                type="checkbox"
                 checked={lockPrice}
                 onChange={e => setLockPrice(e.target.checked)}
                 className="sr-only"
@@ -149,9 +138,10 @@ export default function PriceChangeSheet({ item, onClose, onSuccess }: PriceChan
           className="w-full py-3 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : success ? <CheckCircle size={16} /> : null}
-          {success ? 'Price Updated!' : busy ? 'Applying...' : 'Apply Price Change'}
+          {success ? 'Price Saved!' : busy ? 'Saving...' : 'Save Price'}
         </button>
 
+        {!error && !success && <p className="text-[10px] text-gray-400 text-center">Queued for POS send</p>}
         {error && <p className="text-xs text-red-600 font-medium text-center">{error}</p>}
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
 import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment } from '../../lib/jarvisActions'
+import { removeByBarcode } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, formatItemLocation, getDisplayLabel } from '../../lib/locationUtils'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
@@ -342,6 +343,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     setSendBusy(true)
     try {
       const res = await sendItemToPos(item.barcode)
+      if (res.success) removeByBarcode(item.barcode)
       if (mounted.current) flashMsg(res.success ? 'Sent to POS' : (res.message ?? 'Failed'))
     } catch (err) {
       if (mounted.current) flashMsg((err as Error).message)
@@ -701,14 +703,14 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
             </div>
           )}
 
-          {/* Send to POS — full width */}
+          {/* Send to POS Now — secondary action */}
           <button
             onClick={(e) => { e.stopPropagation(); handleSendToPos() }}
             disabled={sendBusy || !item.barcode}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
             {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            <span className="text-xs font-semibold">Send to POS</span>
+            <span className="text-xs font-medium">Send to POS Now</span>
           </button>
 
           {/* POS status + Refresh footer */}

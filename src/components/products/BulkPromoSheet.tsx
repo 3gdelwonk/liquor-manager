@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Search, X, Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer, Award } from 'lucide-react'
+import { Search, X, Loader2, CheckCircle, Tag, Calendar, Megaphone, Printer, Award } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
 import { createPromo, printTalker, generateLabelQueue } from '../../lib/jarvisActions'
+import { addPromoChange } from '../../lib/pendingPosChanges'
 
 const PROMO_TYPES = [
   { key: 'iga_rewards',        label: 'IGA Rewards',       talker: 'iga_rewards' },
@@ -37,7 +38,6 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
   const [promoType, setPromoType] = useState('iga_rewards')
   const [startDate, setStartDate] = useState(today)
   const [endDate, setEndDate] = useState(twoWeeks)
-  const [sendToPos, setSendToPos] = useState(true)
   const [sendOffer, setSendOffer] = useState(false)
   const [printTalkerOn, setPrintTalkerOn] = useState(false)
   const [talkerPrinter, setTalkerPrinter] = useState<number | null>(null)
@@ -134,11 +134,27 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
           startDate,
           endDate,
           promoType,
-          sendToPos,
+          sendToPos: false,
           sendOffer,
         })
         if (res.success) {
           totalOk += res.created ?? barcodes.length
+          // Queue each item for POS send
+          for (const bc of barcodes) {
+            const entry = valid.find(e => e.item.barcode === bc)
+            if (entry) {
+              addPromoChange({
+                barcode: bc,
+                itemCode: entry.item.itemCode,
+                description: entry.item.description,
+                promoPrice: price,
+                normalPrice: entry.item.sellPrice,
+                promoType,
+                startDate,
+                endDate,
+              })
+            }
+          }
           if (res.message) messages.push(res.message)
         } else {
           totalFailed += barcodes.length
@@ -275,7 +291,6 @@ export default function BulkPromoSheet({ items, onClose, onSuccess }: BulkPromoS
 
           {/* Toggles */}
           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-            <MiniToggle checked={sendToPos} onChange={setSendToPos} icon={<Send size={12} />} label="POS" disabled={processing} />
             <MiniToggle checked={sendOffer} onChange={setSendOffer} icon={<Megaphone size={12} />} label="Portal" disabled={processing} />
             <MiniToggle checked={printTalkerOn} onChange={setPrintTalkerOn} icon={<Printer size={12} />} label="Talkers" disabled={processing} />
           </div>

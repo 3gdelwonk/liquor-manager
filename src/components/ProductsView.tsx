@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer, Tag, MapPin, ClipboardList } from 'lucide-react'
+import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer, Tag, MapPin, ClipboardList, Send } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, searchItems,
   LIQUOR_DEPT_NAMES,
@@ -20,11 +20,13 @@ import BulkPrintSheet from './products/BulkPrintSheet'
 import BulkPromoSheet from './products/BulkPromoSheet'
 import BulkLocationSheet from './products/BulkLocationSheet'
 import BulkAdjustSheet from './products/BulkAdjustSheet'
+import SendToPosSheet from './products/SendToPosSheet'
+import { usePendingCount } from '../lib/pendingPosChanges'
 
 type Segment = 'all' | 'promo' | 'low'
 type DeptFilter = 'all' | 'WINE' | 'BEER' | 'SPIRITS' | 'LIQUEURS' | 'LIQUOR/MISC'
 type SortKey = 'revenue' | 'price' | 'qoh'
-type SheetType = 'price' | 'promo' | 'createItem' | 'bulkPrice' | 'bulkPromo' | 'printLabel' | 'bulkPrint' | 'bulkLocation' | 'bulkAdjust' | 'token' | null
+type SheetType = 'price' | 'promo' | 'createItem' | 'bulkPrice' | 'bulkPromo' | 'printLabel' | 'bulkPrint' | 'bulkLocation' | 'bulkAdjust' | 'sendToPos' | 'token' | null
 
 const DEPT_FILTERS: { key: DeptFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -58,6 +60,7 @@ export default function ProductsView() {
 
   const [fabOpen, setFabOpen] = useState(false)
   const [displayLimit, setDisplayLimit] = useState(50)
+  const pendingPosCount = usePendingCount()
 
   const trackedItemCodes = useTrackedItemCodes()
   const { resolveCode } = useProductCodeLookup()
@@ -448,6 +451,17 @@ export default function ProductsView() {
         {fabOpen && (
           <>
             <button
+              onClick={() => { setFabOpen(false); setActiveSheet('sendToPos') }}
+              className="flex items-center gap-2 px-3 py-2 bg-blue-600 rounded-full shadow-lg border border-blue-700 text-sm font-medium text-white hover:bg-blue-700 active:scale-95 transition-transform relative"
+            >
+              <Send size={16} /> Send to POS
+              {pendingPosCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {pendingPosCount > 99 ? '99' : pendingPosCount}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => { setFabOpen(false); setActiveSheet('createItem') }}
               className="flex items-center gap-2 px-3 py-2 bg-white rounded-full shadow-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
             >
@@ -499,6 +513,12 @@ export default function ProductsView() {
       <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
 
       {/* Bottom Sheets */}
+      {activeSheet === 'sendToPos' && (
+        <SendToPosSheet
+          onClose={() => setActiveSheet(null)}
+          onSuccess={fetchData}
+        />
+      )}
       {activeSheet === 'token' && (
         <SetTokenSheet
           onClose={() => setActiveSheet(null)}

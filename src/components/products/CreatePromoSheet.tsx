@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Loader2, CheckCircle, Tag, Calendar, Send, Megaphone, Printer, Award } from 'lucide-react'
+import { Loader2, CheckCircle, Tag, Calendar, Megaphone, Printer, Award } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
 import { getPrinters, type Printer as PrinterType } from '../../lib/jarvis'
 import { createPromo, printTalker, generateLabelQueue } from '../../lib/jarvisActions'
+import { addPromoChange } from '../../lib/pendingPosChanges'
 
 const PROMO_TYPES = [
   { key: 'iga_rewards',        label: 'IGA Rewards',       talker: 'iga_rewards' },
@@ -31,7 +32,6 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
   const [promoType, setPromoType] = useState('iga_rewards')
   const [startDate, setStartDate] = useState(today)
   const [endDate, setEndDate] = useState(twoWeeks)
-  const [sendToPos, setSendToPos] = useState(true)
   const [sendOffer, setSendOffer] = useState(false)
   const [printTalkerOn, setPrintTalkerOn] = useState(false)
   const [talkerPrinter, setTalkerPrinter] = useState<number | null>(null)
@@ -72,10 +72,20 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
         startDate,
         endDate,
         promoType,
-        sendToPos,
+        sendToPos: false,
         sendOffer,
       })
       if (res.success) {
+        addPromoChange({
+          barcode: item.barcode!,
+          itemCode: item.itemCode,
+          description: item.description,
+          promoPrice: price,
+          normalPrice: item.sellPrice,
+          promoType,
+          startDate,
+          endDate,
+        })
         const parts: string[] = [`Promotion created`]
         if (res.posSent) parts.push('sent to POS')
         if (res.offerSent) parts.push('portal updated')
@@ -204,7 +214,6 @@ export default function CreatePromoSheet({ item, onClose, onSuccess }: CreatePro
 
         {/* Toggles */}
         <div className="space-y-2">
-          <Toggle checked={sendToPos} onChange={setSendToPos} icon={<Send size={14} />} label="Send to POS terminal" color="violet" />
           <Toggle checked={sendOffer} onChange={setSendOffer} icon={<Megaphone size={14} />} label="Update Smart Retail portal" color="violet" />
           <Toggle checked={printTalkerOn} onChange={setPrintTalkerOn} icon={<Printer size={14} />} label="Print promo talker" color="violet" />
           {printTalkerOn && talkerPrinters.length > 0 && (

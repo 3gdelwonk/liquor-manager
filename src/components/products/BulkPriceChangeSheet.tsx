@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
-import { Search, X, Loader2, CheckCircle, AlertCircle, Send } from 'lucide-react'
+import { Search, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
-import { changePriceAndSend, changePriceOnly } from '../../lib/jarvisActions'
+import { changePriceOnly } from '../../lib/jarvisActions'
+import { addPriceChange } from '../../lib/pendingPosChanges'
 
 interface BulkPriceChangeSheetProps {
   items: StockItem[]
@@ -23,7 +24,6 @@ function fmtMoney(n: number) {
 export default function BulkPriceChangeSheet({ items, onClose, onSuccess }: BulkPriceChangeSheetProps) {
   const [search, setSearch] = useState('')
   const [entries, setEntries] = useState<PriceEntry[]>([])
-  const [sendToPos, setSendToPos] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [done, setDone] = useState(false)
 
@@ -74,10 +74,17 @@ export default function BulkPriceChangeSheet({ items, onClose, onSuccess }: Bulk
       setEntries(prev => prev.map((e, j) => j === i ? { ...e, status: 'sending' } : e))
 
       try {
-        const res = sendToPos
-          ? await changePriceAndSend(entry.item.barcode, price)
-          : await changePriceOnly(entry.item.barcode, price)
+        const res = await changePriceOnly(entry.item.barcode, price)
 
+        if (res.success) {
+          addPriceChange({
+            barcode: entry.item.barcode!,
+            itemCode: entry.item.itemCode,
+            description: entry.item.description,
+            oldPrice: entry.item.sellPrice,
+            newPrice: price,
+          })
+        }
         setEntries(prev => prev.map((e, j) => j === i
           ? { ...e, status: res.success ? 'done' : 'error', message: res.success ? undefined : (res.message ?? 'Failed') }
           : e
@@ -219,18 +226,6 @@ export default function BulkPriceChangeSheet({ items, onClose, onSuccess }: Bulk
 
         {/* Footer */}
         <div className="border-t border-gray-100 p-4 space-y-3 shrink-0">
-          {/* Send to POS toggle */}
-          <label className="flex items-center gap-3 cursor-pointer">
-            <div className="relative">
-              <input type="checkbox" checked={sendToPos} onChange={e => setSendToPos(e.target.checked)} className="sr-only" disabled={processing} />
-              <div className={`w-10 h-5 rounded-full transition-colors ${sendToPos ? 'bg-violet-600' : 'bg-gray-300'}`} />
-              <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${sendToPos ? 'translate-x-5' : ''}`} />
-            </div>
-            <div className="flex items-center gap-1.5 text-sm text-gray-700">
-              <Send size={14} /> Send to POS terminal
-            </div>
-          </label>
-
           {done ? (
             <div className="text-center space-y-1">
               <p className="text-sm font-medium text-green-600">{doneCount} updated{errorCount > 0 ? `, ${errorCount} failed` : ''}</p>
