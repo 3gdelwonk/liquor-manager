@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer, Tag, MapPin, ClipboardList, Send, PowerOff } from 'lucide-react'
 import {
-  checkConnection, getStockLevels, getPromotions, searchItems,
+  checkConnection, getStockLevels, getPromotions, searchItems, getItemSales,
   LIQUOR_DEPT_NAMES,
   type StockItem, type LivePromotion,
 } from '../lib/jarvis'
@@ -114,25 +114,79 @@ export default function ProductsView() {
     return () => clearInterval(iv)
   }, [fetchData])
 
-  // Server search helper — merges results into items and tracks matched codes
+  // Server search helper — merges results into items and tracks matched codes.
+  //
+  // IMPORTANT: the server-side /api/pos/search endpoint returns an inconsistent
+  // shape. Name / description / itemCode matches DROP the BarCode field, while
+  // barcode matches include it. Every ProductCard action (price, department,
+  // cost, active, apply change) gates on `item.barcode`, so losing it disables
+  // the whole card. To protect against that, every merge here carries forward
+  // any field present on the existing item that the search response is missing
+  // — barcode first, but also orderCode, priceLocked, etc.
   const runServerSearch = useCallback(async (query: string, withInactive = false) => {
     try {
       const res = await searchItems(query, 100, withInactive)
       if (res.items.length > 0) {
         setServerMatchCodes(new Set(res.items.map(i => i.itemCode)))
-        for (const item of res.items) {
-          if (!LIQUOR_DEPT_NAMES.has(item.department)) {
-            searchedItems.current.set(item.itemCode, item)
-          } else if (!item.isActive) {
-            // Inactive liquor items aren't in the default stock fetch — keep them in the search cache
-            searchedItems.current.set(item.itemCode, item)
+
+        // Merge each search hit against the existing cached copy (if any) so
+        // fields the search response drops don't get nulled out.
+        const mergeFromExisting = (next: StockItem, existing: StockItem | undefined): StockItem => {
+          if (!existing) return next
+          return {
+            ...existing,
+            ...next,
+            barcode: next.barcode ?? existing.barcode,
+            orderCode: next.orderCode ?? existing.orderCode,
+            priceLocked: next.priceLocked ?? existing.priceLocked,
           }
         }
+
+        const stillMissingBarcode: string[] = []
         setItems(prev => {
           const existing = new Map(prev.map(i => [i.itemCode, i]))
-          for (const item of res.items) existing.set(item.itemCode, item)
+          for (const item of res.items) {
+            const merged = mergeFromExisting(item, existing.get(item.itemCode))
+            existing.set(item.itemCode, merged)
+            if (!merged.barcode) stillMissingBarcode.push(merged.itemCode)
+
+            // Keep non-liquor and inactive-liquor search hits in the cache so
+            // they survive the next fetchData refresh.
+            if (!LIQUOR_DEPT_NAMES.has(merged.department) || !merged.isActive) {
+              searchedItems.current.set(merged.itemCode, merged)
+            }
+          }
           return Array.from(existing.values())
         })
+
+        // Backfill missing barcodes via /item-sales (which returns barcode
+        // reliably). This covers the case where a name / itemCode search
+        // surfaces an item we've never seen before, so there's no cached
+        // copy to merge from. Run in parallel, then patch items state once.
+        if (stillMissingBarcode.length > 0) {
+          const results = await Promise.allSettled(
+            stillMissingBarcode.map(code => getItemSales(code, 1))
+          )
+          const bcMap = new Map<string, string>()
+          results.forEach((r, idx) => {
+            if (r.status === 'fulfilled' && r.value.barcode) {
+              bcMap.set(stillMissingBarcode[idx], r.value.barcode)
+            }
+          })
+          if (bcMap.size > 0) {
+            setItems(prev => prev.map(i => {
+              const bc = bcMap.get(i.itemCode)
+              return bc && !i.barcode ? { ...i, barcode: bc } : i
+            }))
+            // Also backfill the search cache so subsequent refreshes keep it
+            for (const [code, bc] of bcMap) {
+              const cached = searchedItems.current.get(code)
+              if (cached && !cached.barcode) {
+                searchedItems.current.set(code, { ...cached, barcode: bc })
+              }
+            }
+          }
+        }
       }
     } catch { /* keep existing data on search failure */ }
   }, [])
