@@ -200,8 +200,8 @@ export default function ProductsView() {
     let list = items
 
     // Search filter (client-side for instant feedback)
-    // Barcode check is bidirectional: handles when the typed barcode (e.g., 13-digit EAN)
-    // is longer than the stored barcode (e.g., 12 digits without check digit), or vice versa
+    // Barcode/order-code check: query can be a substring of the stored code (partial typing),
+    // but NOT the reverse — a short stored barcode matching inside a longer query causes false positives
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter(i => {
@@ -212,8 +212,8 @@ export default function ProductsView() {
         return (
           i.description.toLowerCase().includes(q) ||
           i.itemCode.toLowerCase().includes(q) ||
-          (bc && (bc.includes(q) || q.includes(bc))) ||
-          (oc && (oc.includes(q) || q.includes(oc)))
+          (bc && bc.includes(q)) ||
+          (oc && oc.includes(q))
         )
       })
     }
@@ -256,8 +256,8 @@ export default function ProductsView() {
         return (
           i.description.toLowerCase().includes(q) ||
           i.itemCode.toLowerCase().includes(q) ||
-          (bc && (bc.includes(q) || q.includes(bc))) ||
-          (oc && (oc.includes(q) || q.includes(oc)))
+          (bc && bc.includes(q)) ||
+          (oc && oc.includes(q))
         )
       })
     }
