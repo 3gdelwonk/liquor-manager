@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer, Tag, MapPin, ClipboardList, Send } from 'lucide-react'
+import { RefreshCw, WifiOff, Search, ScanBarcode, X, Plus, Package, ListPlus, Printer, Tag, MapPin, ClipboardList, Send, PowerOff } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, searchItems,
   LIQUOR_DEPT_NAMES,
@@ -52,6 +52,7 @@ export default function ProductsView() {
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [search, setSearch] = useState('')
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [includeInactive, setIncludeInactive] = useState(false)
 
   // Sheets
   const [activeSheet, setActiveSheet] = useState<SheetType>(null)
@@ -114,13 +115,16 @@ export default function ProductsView() {
   }, [fetchData])
 
   // Server search helper — merges results into items and tracks matched codes
-  const runServerSearch = useCallback(async (query: string) => {
+  const runServerSearch = useCallback(async (query: string, withInactive = false) => {
     try {
-      const res = await searchItems(query, 100)
+      const res = await searchItems(query, 100, withInactive)
       if (res.items.length > 0) {
         setServerMatchCodes(new Set(res.items.map(i => i.itemCode)))
         for (const item of res.items) {
           if (!LIQUOR_DEPT_NAMES.has(item.department)) {
+            searchedItems.current.set(item.itemCode, item)
+          } else if (!item.isActive) {
+            // Inactive liquor items aren't in the default stock fetch — keep them in the search cache
             searchedItems.current.set(item.itemCode, item)
           }
         }
@@ -144,12 +148,22 @@ export default function ProductsView() {
     const trimmed = query.trim()
     const isBarcodeLike = /^\d{8,}$/.test(trimmed)
     if (isBarcodeLike) {
-      // Barcode input — search immediately so the item never flickers away
-      runServerSearch(trimmed)
+      // Barcode input — search immediately so the item never flickers away.
+      // Always include inactive on barcode scans so we never drop a real match.
+      runServerSearch(trimmed, true)
     } else {
-      searchTimer.current = setTimeout(() => runServerSearch(trimmed), 300)
+      searchTimer.current = setTimeout(() => runServerSearch(trimmed, includeInactive), 300)
     }
-  }, [runServerSearch])
+  }, [runServerSearch, includeInactive])
+
+  // Re-run search when the inactive toggle flips
+  useEffect(() => {
+    if (!search.trim()) return
+    const trimmed = search.trim()
+    const isBarcodeLike = /^\d{8,}$/.test(trimmed)
+    runServerSearch(trimmed, isBarcodeLike ? true : includeInactive)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includeInactive])
 
   // Handle barcode scan — reset filters and do immediate server lookup
   const handleScan = useCallback(async (code: string) => {
@@ -158,8 +172,8 @@ export default function ProductsView() {
     setDeptFilter('all')
     const resolved = resolveCode(code)
     setSearch(resolved)
-    // Immediate server search (no debounce) for barcode scans
-    await runServerSearch(resolved)
+    // Immediate server search (no debounce) for barcode scans, always inactive-aware
+    await runServerSearch(resolved, true)
   }, [resolveCode, runServerSearch])
 
   // Handle action from ProductCard
@@ -195,6 +209,13 @@ export default function ProductsView() {
   const toggleItemLock = useCallback((itemCode: string, locked: boolean) => {
     setItems(prev => prev.map(i =>
       i.itemCode === itemCode ? { ...i, priceLocked: locked } : i
+    ))
+  }, [])
+
+  // Toggle active flag on a product
+  const updateItemActive = useCallback((itemCode: string, active: boolean) => {
+    setItems(prev => prev.map(i =>
+      i.itemCode === itemCode ? { ...i, isActive: active } : i
     ))
   }, [])
 
@@ -349,31 +370,45 @@ export default function ProductsView() {
       </div>
 
       {/* Search */}
-      <div className="flex gap-2 px-4 py-2 border-b border-gray-100">
-        <div className="flex-1 relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => handleSearch(e.target.value)}
-            placeholder="Search product, barcode, item code..."
-            className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
-          />
-          {search && (
-            <button
-              onClick={() => { setSearch(''); setServerMatchCodes(new Set()); searchedItems.current.clear(); fetchData() }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
-              <X size={14} />
-            </button>
-          )}
+      <div className="px-4 py-2 border-b border-gray-100 space-y-1.5">
+        <div className="flex gap-2">
+          <div className="flex-1 relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => handleSearch(e.target.value)}
+              placeholder="Search product, barcode, item code..."
+              className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+            />
+            {search && (
+              <button
+                onClick={() => { setSearch(''); setServerMatchCodes(new Set()); searchedItems.current.clear(); fetchData() }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setScannerOpen(true)}
+            className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:text-violet-600 hover:border-violet-300"
+            title="Scan barcode"
+          >
+            <ScanBarcode size={18} />
+          </button>
         </div>
         <button
-          onClick={() => setScannerOpen(true)}
-          className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:text-violet-600 hover:border-violet-300"
-          title="Scan barcode"
+          onClick={() => setIncludeInactive(v => !v)}
+          className={`flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+            includeInactive
+              ? 'border-amber-300 bg-amber-50 text-amber-700'
+              : 'border-gray-200 text-gray-400 hover:text-gray-600'
+          }`}
+          title="Include inactive items in search"
         >
-          <ScanBarcode size={18} />
+          <PowerOff size={11} />
+          {includeInactive ? 'Including inactive' : 'Include inactive'}
         </button>
       </div>
 
@@ -434,6 +469,7 @@ export default function ProductsView() {
             onAction={(action) => handleCardAction(item, action)}
             onRefresh={() => refreshItem(item.itemCode)}
             onToggleLock={(locked) => toggleItemLock(item.itemCode, locked)}
+            onToggleActive={(active) => updateItemActive(item.itemCode, active)}
           />
         ))}
         {displayLimit < displayed.length && (

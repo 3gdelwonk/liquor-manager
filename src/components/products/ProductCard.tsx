@@ -2,12 +2,12 @@ import { useState, useEffect, useRef, memo, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
   Printer, Send, Loader2, Calendar, RefreshCw, Lock, Unlock,
-  Box, Truck, Trash2,
+  Box, Truck, Trash2, Power, PowerOff,
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
-import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment } from '../../lib/jarvisActions'
-import { removeByBarcode } from '../../lib/pendingPosChanges'
+import { adjustStock, sendItemToPos, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment, setItemActive } from '../../lib/jarvisActions'
+import { removeByBarcode, addActiveChange } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, formatItemLocation, getDisplayLabel } from '../../lib/locationUtils'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
@@ -96,9 +96,10 @@ interface ProductCardProps {
   onAction: (action: 'price' | 'promo' | 'createItem' | 'printLabel') => void
   onRefresh?: () => Promise<void>
   onToggleLock?: (locked: boolean) => void
+  onToggleActive?: (active: boolean) => void
 }
 
-function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock }: ProductCardProps) {
+function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock, onToggleActive }: ProductCardProps) {
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -109,6 +110,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   const detailLoaded = useRef(false)
   const [refreshing, setRefreshing] = useState(false)
   const [lockBusy, setLockBusy] = useState(false)
+  const [activeBusy, setActiveBusy] = useState(false)
 
   // Stock adjustment sheet
   const [showAdjustSheet, setShowAdjustSheet] = useState(false)
@@ -352,6 +354,36 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }
   }
 
+  async function handleToggleActive() {
+    if (!item.barcode) return
+    const oldActive = item.isActive
+    const newActive = !oldActive
+    setActiveBusy(true)
+    try {
+      const res = await setItemActive(item.barcode, newActive)
+      if (!mounted.current) return
+      if (res.success) {
+        // Optimistic update via parent
+        onToggleActive?.(newActive)
+        // Queue for POS terminal sync
+        addActiveChange({
+          barcode: item.barcode,
+          itemCode: item.itemCode,
+          description: item.description,
+          oldActive,
+          newActive,
+        })
+        flashMsg(newActive ? 'Activated — queued for POS' : 'Deactivated — queued for POS')
+      } else {
+        flashMsg(res.message ?? 'Failed')
+      }
+    } catch (err) {
+      if (mounted.current) flashMsg((err as Error).message)
+    } finally {
+      if (mounted.current) setActiveBusy(false)
+    }
+  }
+
   async function handleToggleLock() {
     if (!item.barcode) return
     const newLocked = !item.priceLocked
@@ -369,7 +401,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   }
 
   return (
-    <div className="border border-gray-100 rounded-xl overflow-hidden">
+    <div className={`border rounded-xl overflow-hidden ${item.isActive ? 'border-gray-100' : 'border-gray-300 bg-gray-50/60 opacity-75'}`}>
       {/* Collapsed summary — always visible */}
       <button className="w-full text-left p-3 flex gap-3" onClick={() => setExpanded(e => !e)}>
         <ProductImage
@@ -388,6 +420,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
             </span>
             {promo && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-700">PROMO</span>}
             {item.priceLocked && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-red-100 text-red-700 flex items-center gap-0.5"><Lock size={8} />LOCKED</span>}
+            {!item.isActive && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-gray-200 text-gray-600 flex items-center gap-0.5"><PowerOff size={8} />INACTIVE</span>}
             {isTracked && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-cyan-100 text-cyan-700">TRACKING</span>}
           </div>
 
@@ -703,15 +736,33 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
             </div>
           )}
 
-          {/* Send to POS Now — secondary action */}
-          <button
-            onClick={(e) => { e.stopPropagation(); handleSendToPos() }}
-            disabled={sendBusy || !item.barcode}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            <span className="text-xs font-medium">Send to POS Now</span>
-          </button>
+          {/* Active toggle + Send to POS Now — secondary actions */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); handleToggleActive() }}
+              disabled={activeBusy || !item.barcode}
+              className={`flex items-center justify-center gap-2 py-2 rounded-lg border transition-colors disabled:opacity-50 ${
+                item.isActive
+                  ? 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                  : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+              }`}
+            >
+              {activeBusy
+                ? <Loader2 size={14} className="animate-spin" />
+                : item.isActive ? <PowerOff size={14} /> : <Power size={14} />}
+              <span className="text-xs font-medium">
+                {item.isActive ? 'Deactivate' : 'Activate'}
+              </span>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleSendToPos() }}
+              disabled={sendBusy || !item.barcode}
+              className="flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {sendBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              <span className="text-xs font-medium">Send to POS Now</span>
+            </button>
+          </div>
 
           {/* POS status + Refresh footer */}
           <div className="flex items-center justify-between px-1">
@@ -778,6 +829,7 @@ export default memo(ProductCard, (prev, next) =>
   prev.item.sellPrice === next.item.sellPrice &&
   prev.item.onHand === next.item.onHand &&
   prev.item.priceLocked === next.item.priceLocked &&
+  prev.item.isActive === next.item.isActive &&
   prev.item.avgCost === next.item.avgCost &&
   prev.item.department === next.item.department &&
   prev.promo === next.promo &&

@@ -155,6 +155,7 @@ interface RawStockItem {
   barcode: string | null;
   OrderCode: string | null;
   PriceLocked?: boolean;
+  IsActive?: boolean;
 }
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -215,6 +216,7 @@ export interface StockItem {
   avgWeekQty: number;
   orderCode: string | null;
   priceLocked: boolean;
+  isActive: boolean;
 }
 
 export interface LivePromotion {
@@ -252,6 +254,7 @@ export interface StockFilters {
   itemCode?: string;
   lowStock?: boolean;
   limit?: number;
+  includeInactive?: boolean;
 }
 
 export interface OrderOptions {
@@ -317,19 +320,11 @@ export async function getTopSellers(days = 7, limit = 20): Promise<TopSeller[]> 
   }));
 }
 
-export async function getStockLevels(filters: StockFilters = {}): Promise<StockItem[]> {
-  const params = new URLSearchParams();
-  if (filters.department)              params.set('department', filters.department);
-  if (filters.itemCode)                params.set('itemCode', filters.itemCode);
-  if (filters.lowStock !== undefined)  params.set('lowStock', String(filters.lowStock));
-  if (filters.limit !== undefined)     params.set('limit', String(filters.limit));
-  const qs = params.toString();
-  const raw = await jarvisFetch<{ items: RawStockItem[]; count: number }>(
-    `/api/pos/stock${qs ? '?' + qs : ''}`
-  );
-  return raw.items.map(s => ({
+function mapRawStockItem(s: RawStockItem): StockItem {
+  const bc = s.barcode ?? (s as any).BarCode ?? null;
+  return {
     itemCode:       s.ItemCode,
-    barcode:        s.barcode ?? (s as any).BarCode ?? null,
+    barcode:        bc,
     description:    (s.ItemDescription ?? '').trim(),
     department:     s.DepartmentName,
     departmentCode: s.DepartmentCode,
@@ -342,33 +337,33 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
     avgDayQty:      s.AvgDayQty ?? 0,
     avgWeekQty:     s.AvgWeekQty ?? 0,
     orderCode:      s.OrderCode ?? null,
-    priceLocked:    s.PriceLocked ?? isPriceLockedLocal(s.barcode ?? (s as any).BarCode ?? ''),
-  }));
+    priceLocked:    s.PriceLocked ?? isPriceLockedLocal(bc ?? ''),
+    isActive:       s.IsActive ?? true,
+  };
 }
 
-export async function searchItems(query: string, limit = 20): Promise<SearchResult> {
+export async function getStockLevels(filters: StockFilters = {}): Promise<StockItem[]> {
+  const params = new URLSearchParams();
+  if (filters.department)               params.set('department', filters.department);
+  if (filters.itemCode)                 params.set('itemCode', filters.itemCode);
+  if (filters.lowStock !== undefined)   params.set('lowStock', String(filters.lowStock));
+  if (filters.limit !== undefined)      params.set('limit', String(filters.limit));
+  if (filters.includeInactive)          params.set('includeInactive', 'true');
+  const qs = params.toString();
+  const raw = await jarvisFetch<{ items: RawStockItem[]; count: number }>(
+    `/api/pos/stock${qs ? '?' + qs : ''}`
+  );
+  return raw.items.map(mapRawStockItem);
+}
+
+export async function searchItems(query: string, limit = 20, includeInactive = false): Promise<SearchResult> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
+  if (includeInactive) params.set('includeInactive', 'true');
   const raw = await jarvisFetch<{ items: RawStockItem[]; count: number }>(
     `/api/pos/search?${params}`
   );
   return {
-    items: raw.items.map(s => ({
-      itemCode:       s.ItemCode,
-      barcode:        s.barcode ?? (s as any).BarCode ?? null,
-      description:    (s.ItemDescription ?? '').trim(),
-      department:     s.DepartmentName,
-      departmentCode: s.DepartmentCode,
-      onHand:         s.QOH ?? 0,
-      reorderLevel:   s.MinOH ?? 0,
-      sellPrice:      s.RegSellPrice ?? 0,
-      avgCost:        s.AvgCost ?? 0,
-      onOrder:        s.OnOrder ?? 0,
-      isOnReorder:    s.IsOnReorder ?? false,
-      avgDayQty:      s.AvgDayQty ?? 0,
-      avgWeekQty:     s.AvgWeekQty ?? 0,
-      orderCode:      s.OrderCode ?? null,
-      priceLocked:    s.PriceLocked ?? isPriceLockedLocal(s.barcode ?? (s as any).BarCode ?? ''),
-    })),
+    items: raw.items.map(mapRawStockItem),
     total: raw.count,
   };
 }

@@ -25,6 +25,28 @@ export async function changePriceOnly(
   return jarvisPut(`/api/pos-actions/price/${encodeURIComponent(barcode)}`, { newPrice })
 }
 
+export interface SetActiveResult {
+  success: boolean
+  ok?: boolean
+  barcode?: string
+  itemCode?: string
+  description?: string
+  active?: boolean
+  changed?: boolean
+  message?: string
+}
+
+export async function setItemActive(
+  barcode: string,
+  active: boolean
+): Promise<SetActiveResult> {
+  const res = await jarvisPut<SetActiveResult>(
+    `/api/pos-actions/active/${encodeURIComponent(barcode)}`,
+    { active }
+  )
+  return { ...res, success: res.ok ?? res.success ?? false }
+}
+
 export async function sendToPos(
   items: { barcode: string }[]
 ): Promise<{ success: boolean; sent: number; message?: string }> {

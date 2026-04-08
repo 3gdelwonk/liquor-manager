@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   Send, X, Loader2, CheckCircle, AlertCircle, Pencil, Check,
-  DollarSign, Tag, Wifi, WifiOff,
+  DollarSign, Tag, Wifi, WifiOff, Power, PowerOff, PackagePlus,
 } from 'lucide-react'
 import type { CloudStatus } from '../../lib/jarvis'
 import { getCloudStatus } from '../../lib/jarvis'
@@ -10,6 +10,8 @@ import {
   usePendingPosChanges,
   removePriceChange,
   removePromoChange,
+  removeActiveChange,
+  removeNewItem,
   updatePriceChange,
   updatePromoChange,
   clearAll,
@@ -66,7 +68,11 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
       .finally(() => { if (mounted.current) setCloudLoading(false) })
   }
 
-  const totalCount = state.priceChanges.length + state.promoChanges.length
+  const totalCount =
+    state.priceChanges.length +
+    state.promoChanges.length +
+    state.activeChanges.length +
+    state.newItems.length
   const isConnected = cloud?.loggedIn === true
 
   // Start editing a price
@@ -107,10 +113,12 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
       return
     }
 
-    // Collect unique barcodes
+    // Collect unique barcodes across every queued change type
     const barcodeSet = new Set<string>()
-    for (const c of state.priceChanges) barcodeSet.add(c.barcode)
-    for (const c of state.promoChanges) barcodeSet.add(c.barcode)
+    for (const c of state.priceChanges)  barcodeSet.add(c.barcode)
+    for (const c of state.promoChanges)  barcodeSet.add(c.barcode)
+    for (const c of state.activeChanges) barcodeSet.add(c.barcode)
+    for (const c of state.newItems)      if (c.barcode) barcodeSet.add(c.barcode)
     const items = [...barcodeSet].map(barcode => ({ barcode }))
 
     setSending(true)
@@ -147,9 +155,12 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
             <h2 className="text-base font-semibold text-gray-900">Send to POS</h2>
             {totalCount > 0 && (
               <p className="text-xs text-gray-400">
-                {state.priceChanges.length > 0 && `${state.priceChanges.length} price change${state.priceChanges.length !== 1 ? 's' : ''}`}
-                {state.priceChanges.length > 0 && state.promoChanges.length > 0 && ', '}
-                {state.promoChanges.length > 0 && `${state.promoChanges.length} promotion${state.promoChanges.length !== 1 ? 's' : ''}`}
+                {[
+                  state.priceChanges.length  > 0 && `${state.priceChanges.length} price`,
+                  state.promoChanges.length  > 0 && `${state.promoChanges.length} promo`,
+                  state.activeChanges.length > 0 && `${state.activeChanges.length} active`,
+                  state.newItems.length      > 0 && `${state.newItems.length} new`,
+                ].filter(Boolean).join(' · ')}
               </p>
             )}
           </div>
@@ -262,6 +273,76 @@ export default function SendToPosSheet({ onClose, onSuccess }: SendToPosSheetPro
                         <span className="text-gray-300 ml-auto">{timeAgo(c.timestamp)}</span>
                       </div>
                       <p className="text-[10px] text-gray-300 font-mono">{c.barcode}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Active Status Changes */}
+              {state.activeChanges.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <Power size={12} /> Active Status ({state.activeChanges.length})
+                  </div>
+                  {state.activeChanges.map(c => (
+                    <div key={c.id} className="border border-emerald-200 rounded-lg p-3 space-y-1 bg-emerald-50/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-800 truncate flex-1">{c.description}</p>
+                        <button
+                          onClick={() => removeActiveChange(c.id)}
+                          disabled={sending}
+                          className="text-gray-300 hover:text-red-500 shrink-0 disabled:opacity-50"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className={`flex items-center gap-1 ${c.oldActive ? 'text-gray-500' : 'text-gray-400'}`}>
+                          {c.oldActive ? <Power size={10} /> : <PowerOff size={10} />}
+                          {c.oldActive ? 'Active' : 'Inactive'}
+                        </span>
+                        <span className="text-gray-300">→</span>
+                        <span className={`flex items-center gap-1 font-semibold ${c.newActive ? 'text-emerald-700' : 'text-gray-700'}`}>
+                          {c.newActive ? <Power size={10} /> : <PowerOff size={10} />}
+                          {c.newActive ? 'Active' : 'Inactive'}
+                        </span>
+                        <span className="text-gray-300 ml-auto">{timeAgo(c.timestamp)}</span>
+                      </div>
+                      <p className="text-[10px] text-gray-300 font-mono">{c.barcode}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* New Items */}
+              {state.newItems.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <PackagePlus size={12} /> New Items ({state.newItems.length})
+                  </div>
+                  {state.newItems.map(c => (
+                    <div key={c.id} className="border border-violet-200 rounded-lg p-3 space-y-1 bg-violet-50/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-800 truncate flex-1">{c.description}</p>
+                        <button
+                          onClick={() => removeNewItem(c.id)}
+                          disabled={sending}
+                          className="text-gray-300 hover:text-red-500 shrink-0 disabled:opacity-50"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-violet-700 font-medium">{c.department}</span>
+                        <span className="text-gray-300">·</span>
+                        <span className="text-gray-700">${fmtMoney(c.sellPrice)}</span>
+                        {c.costPrice > 0 && <span className="text-gray-400">cost ${fmtMoney(c.costPrice)}</span>}
+                        <span className="text-gray-300 ml-auto">{timeAgo(c.timestamp)}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-gray-300 font-mono">
+                        <span>{c.barcode}</span>
+                        {c.itemCode && <span>{c.itemCode}</span>}
+                      </div>
                     </div>
                   ))}
                 </div>

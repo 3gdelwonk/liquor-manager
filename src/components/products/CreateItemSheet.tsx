@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Loader2, CheckCircle, ScanBarcode } from 'lucide-react'
 import { getDepartmentList, LIQUOR_DEPT_CODES, type Department } from '../../lib/jarvis'
 import { createItem, type CreateItemPayload } from '../../lib/jarvisActions'
+import { addNewItem } from '../../lib/pendingPosChanges'
 import BarcodeScanner from '../BarcodeScanner'
 
 interface CreateItemSheetProps {
@@ -88,6 +89,15 @@ export default function CreateItemSheet({ onClose, onSuccess }: CreateItemSheetP
         orderCode: form.orderCode?.trim() || undefined,
       })
       if (res.success) {
+        // Queue for POS terminal sync via Send to POS summary
+        addNewItem({
+          barcode: form.barcode.trim(),
+          itemCode: res.itemCode ?? '',
+          description: form.description.trim(),
+          department: form.department,
+          sellPrice: Number(form.sellPrice) || 0,
+          costPrice: Number(form.costPrice) || 0,
+        })
         setSuccess(true)
         onSuccess()
         setTimeout(onClose, 1200)
