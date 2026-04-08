@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
-import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment, setItemActive } from '../../lib/jarvisActions'
+import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, createLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, formatItemLocation, getDisplayLabel } from '../../lib/locationUtils'
 import ProductImage from '../ProductImage'
@@ -98,9 +98,10 @@ interface ProductCardProps {
   onToggleLock?: (locked: boolean) => void
   onToggleActive?: (active: boolean) => void
   onChangeDepartment?: (departmentCode: number, department: string) => void
+  onChangeCost?: (avgCost: number) => void
 }
 
-function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock, onToggleActive, onChangeDepartment }: ProductCardProps) {
+function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock, onToggleActive, onChangeDepartment, onChangeCost }: ProductCardProps) {
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -121,6 +122,11 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   const [departments, setDepartments] = useState<Department[]>([])
   const [deptLoading, setDeptLoading] = useState(false)
   const [deptBusy, setDeptBusy] = useState(false)
+
+  // Cost price inline edit
+  const [editingCost, setEditingCost] = useState(false)
+  const [costDraft, setCostDraft] = useState('')
+  const [costBusy, setCostBusy] = useState(false)
 
   // Location inline
   const [showLocationPanel, setShowLocationPanel] = useState(false)
@@ -348,6 +354,50 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }
   }
 
+  function startEditCost() {
+    setCostDraft(item.avgCost > 0 ? item.avgCost.toFixed(2) : '')
+    setEditingCost(true)
+  }
+
+  function cancelEditCost() {
+    setEditingCost(false)
+    setCostDraft('')
+  }
+
+  async function handleSaveCost() {
+    if (!item.barcode) return
+    const val = Number(costDraft)
+    if (!(val >= 0) || Number.isNaN(val)) {
+      flashMsg('Enter a valid cost')
+      return
+    }
+    if (Math.abs(val - item.avgCost) < 0.001) {
+      cancelEditCost()
+      return
+    }
+    setCostBusy(true)
+    try {
+      const res = await changeCostPrice(item.barcode, val)
+      if (!mounted.current) return
+      if (res.success) {
+        onChangeCost?.(res.avgCost ?? val)
+        addSyncItem({
+          barcode: item.barcode,
+          itemCode: item.itemCode,
+          description: item.description,
+        })
+        flashMsg(`Cost → $${(res.avgCost ?? val).toFixed(2)} — queued for POS`)
+        setEditingCost(false)
+      } else {
+        flashMsg(res.message ?? 'Failed to update cost')
+      }
+    } catch (err) {
+      if (mounted.current) flashMsg((err as Error).message)
+    } finally {
+      if (mounted.current) setCostBusy(false)
+    }
+  }
+
   // Apply Change: writes the current client-side state to the database (idempotent
   // price reconcile via SOAP), then queues the item for the next Send to POS batch.
   // The FAB Send to POS picks up every queued item — price changes, promos,
@@ -503,7 +553,38 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     value={`$${fmtMoney(normalPrice)}`}
                     sub={promo ? <span className="text-[9px] font-medium text-amber-600">Promo ${fmtMoney(promo.promoPrice)}</span> : undefined}
                   />
-                  <MetricCell label="Cost" value={item.avgCost > 0 ? `$${fmtMoney(item.avgCost)}` : '—'} />
+                  <div className="text-center" onClick={(e) => { e.stopPropagation(); if (!editingCost && !costBusy) startEditCost() }}>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Cost</p>
+                    {editingCost ? (
+                      <div className="flex items-center gap-0.5 justify-center" onClick={(e) => e.stopPropagation()}>
+                        <span className="text-xs text-gray-400">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={costDraft}
+                          onChange={(e) => setCostDraft(e.target.value)}
+                          autoFocus
+                          disabled={costBusy}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveCost()
+                            if (e.key === 'Escape') cancelEditCost()
+                          }}
+                          className="w-14 text-sm font-semibold text-gray-800 border border-violet-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-300"
+                        />
+                        <button onClick={handleSaveCost} disabled={costBusy} className="text-green-600 disabled:opacity-50">
+                          {costBusy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                        </button>
+                        <button onClick={cancelEditCost} disabled={costBusy} className="text-gray-400 disabled:opacity-50">
+                          <Trash2 size={10} />
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-sm font-semibold text-gray-800 cursor-pointer hover:text-violet-600">
+                        {item.avgCost > 0 ? `$${fmtMoney(item.avgCost)}` : '—'}
+                      </p>
+                    )}
+                  </div>
                   {(() => {
                     const m = normalPrice > 0 && item.avgCost > 0 ? ((normalPrice - item.avgCost) / normalPrice * 100) : null
                     return (
@@ -855,6 +936,7 @@ export default memo(ProductCard, (prev, next) =>
   prev.item.isActive === next.item.isActive &&
   prev.item.avgCost === next.item.avgCost &&
   prev.item.department === next.item.department &&
+  prev.item.departmentCode === next.item.departmentCode &&
   prev.promo === next.promo &&
   prev.isTracked === next.isTracked
 )

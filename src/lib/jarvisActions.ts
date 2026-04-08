@@ -115,10 +115,36 @@ export async function changeDepartment(
   departmentCode: number,
   departmentName: string
 ): Promise<{ success: boolean; message?: string }> {
-  return jarvisPut(`/api/pos-actions/department/${encodeURIComponent(barcode)}`, {
-    departmentCode,
-    departmentName,
-  })
+  const res = await jarvisPut<{ ok?: boolean; success?: boolean; updated?: boolean; error?: string; message?: string }>(
+    `/api/pos-actions/department/${encodeURIComponent(barcode)}`,
+    { departmentCode, departmentName }
+  )
+  return {
+    success: res.ok ?? res.success ?? res.updated ?? false,
+    message: res.message ?? res.error,
+  }
+}
+
+// Update an item's average cost. Server contract:
+//   PUT /api/pos-actions/cost/:barcode   body: { avgCost: number }
+//   returns { ok: true, updated: true, avgCost } on success,
+//           { ok: false, error: "..." } on failure.
+// Cost is an internal figure — not sent to POS terminals directly, but we
+// still queue the barcode in the sync queue so the next Send to POS batch
+// refreshes the full item record on terminals.
+export async function changeCostPrice(
+  barcode: string,
+  avgCost: number
+): Promise<{ success: boolean; avgCost?: number; message?: string }> {
+  const res = await jarvisPut<{ ok?: boolean; success?: boolean; updated?: boolean; avgCost?: number; error?: string; message?: string }>(
+    `/api/pos-actions/cost/${encodeURIComponent(barcode)}`,
+    { avgCost }
+  )
+  return {
+    success: res.ok ?? res.success ?? res.updated ?? false,
+    avgCost: res.avgCost,
+    message: res.message ?? res.error,
+  }
 }
 
 export interface CreateItemPayload {

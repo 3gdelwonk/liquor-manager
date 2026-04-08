@@ -217,6 +217,7 @@ export default function ProductsView() {
     setItems(prev => prev.map(i =>
       i.itemCode === itemCode ? { ...i, isActive: active } : i
     ))
+    setSelectedItem(prev => prev?.itemCode === itemCode ? { ...prev, isActive: active } : prev)
   }, [])
 
   // Change department on a product (optimistic update after successful DB write)
@@ -224,6 +225,15 @@ export default function ProductsView() {
     setItems(prev => prev.map(i =>
       i.itemCode === itemCode ? { ...i, departmentCode, department } : i
     ))
+    setSelectedItem(prev => prev?.itemCode === itemCode ? { ...prev, departmentCode, department } : prev)
+  }, [])
+
+  // Change average cost on a product (optimistic update after successful DB write)
+  const updateItemCost = useCallback((itemCode: string, avgCost: number) => {
+    setItems(prev => prev.map(i =>
+      i.itemCode === itemCode ? { ...i, avgCost } : i
+    ))
+    setSelectedItem(prev => prev?.itemCode === itemCode ? { ...prev, avgCost } : prev)
   }, [])
 
   // Apply filters + sort
@@ -478,6 +488,7 @@ export default function ProductsView() {
             onToggleLock={(locked) => toggleItemLock(item.itemCode, locked)}
             onToggleActive={(active) => updateItemActive(item.itemCode, active)}
             onChangeDepartment={(code, name) => updateItemDepartment(item.itemCode, code, name)}
+            onChangeCost={(avgCost) => updateItemCost(item.itemCode, avgCost)}
           />
         ))}
         {displayLimit < displayed.length && (
