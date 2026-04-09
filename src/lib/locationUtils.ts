@@ -108,14 +108,40 @@ export interface BreadcrumbCell {
   shortCode: string | null
 }
 
+// ── Tolerant field extractors ────────────────────────────────────────────────
+// JARVISmart endpoints use inconsistent shapes — same conceptual field can be
+// `typeId`/`type`/`levelId`, returned as number or string. These helpers try
+// every plausible name and coerce when needed.
+function pickNumber(o: Record<string, unknown>, keys: string[]): number | null {
+  for (const k of keys) {
+    const v = o[k]
+    if (typeof v === 'number' && !isNaN(v)) return v
+    if (typeof v === 'string' && /^-?\d+$/.test(v)) return Number(v)
+  }
+  return null
+}
+function pickString(o: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = o[k]
+    if (typeof v === 'string' && v.trim()) return v
+  }
+  return null
+}
+
+const TYPE_KEYS = ['typeId', 'type', 'typeID', 'levelId', 'level', 'locationTypeId', 'locationType']
+const NAME_KEYS = ['name', 'locationName', 'displayName', 'label', 'title']
+const CODE_KEYS = ['shortCode', 'code', 'short', 'shortcode', 'locationCode']
+const PARENT_KEYS = ['parentId', 'parent', 'parentID', 'parent_id', 'parentLocationId']
+const ID_KEYS = ['locationId', 'id', 'locationID', 'location_id']
+const PATH_KEYS = ['path', 'fullPath', 'breadcrumb', 'hierarchy']
+
 /**
- * Build a 4-level breadcrumb for an item's assigned location, starting from
- * the ItemLocation itself (which always has its own typeId/name/parentId from
- * the assignment) and walking up the parent chain via the loaded flat list.
+ * Build a 4-level breadcrumb for an item's assigned location.
  *
- * Critically robust against the case where `flat` doesn't contain the leaf —
- * we always populate the slot for `loc.typeId` directly from the ItemLocation,
- * so the user always sees at least the level the item is actually assigned at.
+ * Tolerant of varied server response shapes — reads typeId/name/parentId from
+ * any of the plausible field names. Seeds the slot for `loc.typeId` from the
+ * ItemLocation itself, then walks ancestors via the loaded flat list. Falls
+ * back to splitting `path` positionally if nothing populates.
  */
 export function buildItemBreadcrumb(
   loc: ItemLocation,
@@ -126,45 +152,60 @@ export function buildItemBreadcrumb(
     4: { ...empty }, 1: { ...empty }, 2: { ...empty }, 3: { ...empty },
   }
 
-  // Seed from the ItemLocation itself (its own typeId)
-  if (loc.typeId === 1 || loc.typeId === 2 || loc.typeId === 3 || loc.typeId === 4) {
-    result[loc.typeId as LevelKey] = {
-      id: loc.locationId,
-      name: loc.name || null,
-      shortCode: loc.shortCode || null,
+  const o = loc as unknown as Record<string, unknown>
+  const seedTypeId = pickNumber(o, TYPE_KEYS)
+  const seedName = pickString(o, NAME_KEYS)
+  const seedCode = pickString(o, CODE_KEYS)
+  const seedId = pickNumber(o, ID_KEYS)
+  const seedParentId = pickNumber(o, PARENT_KEYS)
+  const seedPath = pickString(o, PATH_KEYS)
+
+  // Seed from the ItemLocation itself (whatever its own typeId is)
+  if (seedTypeId === 1 || seedTypeId === 2 || seedTypeId === 3 || seedTypeId === 4) {
+    result[seedTypeId as LevelKey] = {
+      id: seedId,
+      name: seedName,
+      shortCode: seedCode,
     }
   }
 
-  // Walk up via parentId, looking up each ancestor in the flat list
+  // Walk up via parentId, looking up each ancestor in the flat list (also tolerant)
   const byId = new Map(flat.map(l => [l.id, l]))
-  let parentId: number | null = loc.parentId ?? null
+  let parentId: number | null = seedParentId
   let hops = 0
   while (parentId != null && hops < 10) {
     const parent = byId.get(parentId)
     if (!parent) break
-    if (parent.typeId === 1 || parent.typeId === 2 || parent.typeId === 3 || parent.typeId === 4) {
-      result[parent.typeId as LevelKey] = {
+    const po = parent as unknown as Record<string, unknown>
+    const pType = pickNumber(po, TYPE_KEYS)
+    if (pType === 1 || pType === 2 || pType === 3 || pType === 4) {
+      result[pType as LevelKey] = {
         id: parent.id,
         name: parent.name,
         shortCode: parent.shortCode,
       }
     }
-    parentId = parent.parentId
+    const nextParent = pickNumber(po, PARENT_KEYS)
+    parentId = nextParent
     hops++
   }
 
-  // Last-resort fallback: if we still have nothing populated and the server
-  // sent a `path` like "ZONE > AISLE > BAY > ROW", split it positionally so
-  // the user at least sees something rather than four blank cells.
+  // Fallback: split server `path` positionally if nothing populated
   const populated = (Object.values(result) as BreadcrumbCell[]).some(c => c.name)
-  if (!populated && loc.path && typeof loc.path === 'string') {
-    const parts = loc.path.split('>').map(s => s.trim()).filter(Boolean)
-    // Order top-down: Zone, Aisle, Bay, Row
+  if (!populated && seedPath) {
+    const parts = seedPath.split('>').map(s => s.trim()).filter(Boolean)
     const levelsTopDown: LevelKey[] = [4, 1, 2, 3]
     parts.slice(0, 4).forEach((p, i) => {
       const k = levelsTopDown[i]
       result[k] = { id: null, name: p, shortCode: null }
     })
+  }
+
+  // Final last-resort: if we STILL have nothing, drop whatever name we found
+  // into the deepest plausible slot so the user sees the location at all.
+  const populatedFinal = (Object.values(result) as BreadcrumbCell[]).some(c => c.name)
+  if (!populatedFinal && seedName) {
+    result[3] = { id: seedId, name: seedName, shortCode: seedCode }
   }
 
   return result
