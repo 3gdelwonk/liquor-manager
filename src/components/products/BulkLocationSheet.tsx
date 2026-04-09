@@ -241,7 +241,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                   busy={processing}
                 />
                 <LocationLevelColumn
-                  label="Shelf"
+                  label="Row"
                   options={shelves}
                   selectedId={shelfId}
                   onSelectId={pickShelf}

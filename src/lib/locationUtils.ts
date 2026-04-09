@@ -60,11 +60,11 @@ export const TYPE_LABELS: Record<number, string> = {
   4: 'Zone',
 }
 
-/** Display labels — shows "Shelf" instead of "Row" for user-facing UI */
+/** Display labels for user-facing UI */
 export const TYPE_DISPLAY_LABELS: Record<number, string> = {
   1: 'Aisle',
   2: 'Bay',
-  3: 'Shelf',
+  3: 'Row',
   4: 'Zone',
 }
 

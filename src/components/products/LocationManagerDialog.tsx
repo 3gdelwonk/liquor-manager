@@ -337,7 +337,7 @@ export default function LocationManagerDialog({
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder={`e.g. ${typeId === 4 ? 'Wine Zone' : typeId === 1 ? 'Aisle 1' : typeId === 2 ? 'Bay A' : 'Shelf 1'}`}
+                placeholder={`e.g. ${typeId === 4 ? 'Wine Zone' : typeId === 1 ? 'Aisle 1' : typeId === 2 ? 'Bay A' : 'Row 1'}`}
                 disabled={busy}
                 className="w-full border border-gray-200 rounded-lg px-2.5 py-2 text-sm focus:ring-2 focus:ring-blue-300 disabled:opacity-50"
               />

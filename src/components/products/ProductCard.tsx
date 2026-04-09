@@ -821,7 +821,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                         busy={locBusy}
                       />
                       <LocationLevelColumn
-                        label="Shelf"
+                        label="Row"
                         options={shelves}
                         selectedId={shelfId}
                         onSelectId={setShelf}
