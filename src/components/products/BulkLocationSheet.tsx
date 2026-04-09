@@ -5,6 +5,7 @@ import { getLocations } from '../../lib/jarvis'
 import { bulkAssignLocation } from '../../lib/jarvisActions'
 import { flattenLocations, buildLocationTree } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
+import CreateLocationDialog from './CreateLocationDialog'
 import BarcodeScanner from '../BarcodeScanner'
 
 interface BulkLocationSheetProps {
@@ -20,36 +21,51 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
 
   // Cascading location fields
   const [zoneId, setZoneId] = useState<number | ''>('')
-  const [zoneName, setZoneName] = useState('')
-  const [zoneCode, setZoneCode] = useState('')
   const [aisleId, setAisleId] = useState<number | ''>('')
-  const [aisleName, setAisleName] = useState('')
-  const [aisleCode, setAisleCode] = useState('')
   const [bayId, setBayId] = useState<number | ''>('')
-  const [bayName, setBayName] = useState('')
-  const [bayCode, setBayCode] = useState('')
   const [shelfId, setShelfId] = useState<number | ''>('')
-  const [shelfName, setShelfName] = useState('')
-  const [shelfCode, setShelfCode] = useState('')
+
+  // Create-location dialog state
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createInitialType, setCreateInitialType] = useState<number>(4)
+  const [createInitialParent, setCreateInitialParent] = useState<number | undefined>(undefined)
 
   // Cascade clearing — picking a level resets all descendants
   function pickZone(id: number | '') {
-    setZoneId(id); setZoneName(''); setZoneCode('')
-    setAisleId(''); setAisleName(''); setAisleCode('')
-    setBayId(''); setBayName(''); setBayCode('')
-    setShelfId(''); setShelfName(''); setShelfCode('')
+    setZoneId(id); setAisleId(''); setBayId(''); setShelfId('')
   }
   function pickAisle(id: number | '') {
-    setAisleId(id); setAisleName(''); setAisleCode('')
-    setBayId(''); setBayName(''); setBayCode('')
-    setShelfId(''); setShelfName(''); setShelfCode('')
+    setAisleId(id); setBayId(''); setShelfId('')
   }
   function pickBay(id: number | '') {
-    setBayId(id); setBayName(''); setBayCode('')
-    setShelfId(''); setShelfName(''); setShelfCode('')
+    setBayId(id); setShelfId('')
   }
   function pickShelf(id: number | '') {
-    setShelfId(id); setShelfName(''); setShelfCode('')
+    setShelfId(id)
+  }
+
+  function openCreateDialog() {
+    let nextType = 4
+    let parent: number | undefined = undefined
+    if (zoneId && !aisleId) { nextType = 1; parent = typeof zoneId === 'number' ? zoneId : undefined }
+    else if (aisleId && !bayId) { nextType = 2; parent = typeof aisleId === 'number' ? aisleId : undefined }
+    else if (bayId && !shelfId) { nextType = 3; parent = typeof bayId === 'number' ? bayId : undefined }
+    setCreateInitialType(nextType)
+    setCreateInitialParent(parent)
+    setCreateOpen(true)
+  }
+
+  async function handleLocationCreated(newId: number, typeId: number) {
+    try {
+      const updated = await getLocations()
+      setLocations(updated.filter(l => l.active))
+      if (typeId === 4) setZoneId(newId)
+      else if (typeId === 1) setAisleId(newId)
+      else if (typeId === 2) setBayId(newId)
+      else if (typeId === 3) setShelfId(newId)
+    } catch {
+      // noop
+    }
   }
 
   const [processing, setProcessing] = useState(false)
@@ -120,38 +136,21 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
 
   async function handleAssignAll() {
     if (entries.length === 0) return
+    const targetId = resolveTargetLocation([
+      { id: zoneId, typeId: 4 },
+      { id: aisleId, typeId: 1 },
+      { id: bayId, typeId: 2 },
+      { id: shelfId, typeId: 3 },
+    ])
+    if (!targetId) {
+      setError('Select a location level')
+      return
+    }
     setProcessing(true)
     setError(null)
     setResult(null)
-    let walkerErrored = false
     try {
-      const result = await resolveTargetLocation(
-        [
-          { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
-          { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
-          { id: bayId, name: bayName, code: bayCode, typeId: 2 },
-          { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
-        ],
-        (msg) => { walkerErrored = true; setError(msg) },
-      )
-      if (!result) {
-        if (!walkerErrored) setError('Select or create at least one location level')
-        setProcessing(false)
-        return
-      }
-
-      // Update cascade state with real IDs so newly created locations appear as established picks
-      const ids = result.resolvedIds
-      if (ids[4] && zoneId === -1) { setZoneId(ids[4]); setZoneName(''); setZoneCode('') }
-      if (ids[1] && aisleId === -1) { setAisleId(ids[1]); setAisleName(''); setAisleCode('') }
-      if (ids[2] && bayId === -1) { setBayId(ids[2]); setBayName(''); setBayCode('') }
-      if (ids[3] && shelfId === -1) { setShelfId(ids[3]); setShelfName(''); setShelfCode('') }
-
-      // Reload locations so any newly-created levels are reflected in the dropdowns
-      const updated = await getLocations()
-      setLocations(updated.filter(l => l.active))
-
-      const res = await bulkAssignLocation(result.finalId, entries.map(e => e.itemCode))
+      const res = await bulkAssignLocation(targetId, entries.map(e => e.itemCode))
       if (res.success) {
         setResult({
           ok: res.assigned ?? entries.length,
@@ -168,13 +167,12 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     }
   }
 
-  const cascadeLevels = [
-    { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
-    { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
-    { id: bayId, name: bayName, code: bayCode, typeId: 2 },
-    { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
-  ]
-  const hasAnyLevel = hasAnyCascadeInput(cascadeLevels)
+  const hasAnyLevel = hasAnyCascadeInput([
+    { id: zoneId, typeId: 4 },
+    { id: aisleId, typeId: 1 },
+    { id: bayId, typeId: 2 },
+    { id: shelfId, typeId: 3 },
+  ])
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -194,50 +192,43 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
             </div>
           ) : (
             <div className="bg-blue-50 rounded-lg p-3 space-y-2">
-              <p className="text-[10px] font-semibold text-blue-500 uppercase">Target Location</p>
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-semibold text-blue-500 uppercase">Target Location</p>
+                <button
+                  onClick={openCreateDialog}
+                  disabled={processing}
+                  className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                >
+                  + Create
+                </button>
+              </div>
               <div className="grid grid-cols-4 gap-1.5">
                 <LocationLevelColumn
                   label="Zone"
                   options={zones}
                   selectedId={zoneId}
-                  name={zoneName}
-                  code={zoneCode}
                   onSelectId={pickZone}
-                  onName={setZoneName}
-                  onCode={setZoneCode}
                   busy={processing}
                 />
                 <LocationLevelColumn
                   label="Aisle"
                   options={aisles}
                   selectedId={aisleId}
-                  name={aisleName}
-                  code={aisleCode}
                   onSelectId={pickAisle}
-                  onName={setAisleName}
-                  onCode={setAisleCode}
                   busy={processing}
                 />
                 <LocationLevelColumn
                   label="Bay"
                   options={bays}
                   selectedId={bayId}
-                  name={bayName}
-                  code={bayCode}
                   onSelectId={pickBay}
-                  onName={setBayName}
-                  onCode={setBayCode}
                   busy={processing}
                 />
                 <LocationLevelColumn
-                  label="Row"
+                  label="Shelf"
                   options={shelves}
                   selectedId={shelfId}
-                  name={shelfName}
-                  code={shelfCode}
                   onSelectId={pickShelf}
-                  onName={setShelfName}
-                  onCode={setShelfCode}
                   busy={processing}
                 />
               </div>
@@ -349,6 +340,15 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
       </div>
 
       <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
+
+      <CreateLocationDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleLocationCreated}
+        allLocations={locations}
+        initialTypeId={createInitialType}
+        initialParentId={createInitialParent}
+      />
     </div>
   )
 }

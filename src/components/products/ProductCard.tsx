@@ -10,6 +10,7 @@ import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, remo
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, formatItemLocation } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
+import CreateLocationDialog from './CreateLocationDialog'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 
@@ -84,10 +85,10 @@ function marginColor(m: number) {
 
 // Persists location field selections across ProductCard instances within a session
 const locationMemory = {
-  zoneId: '' as number | '', zoneName: '', zoneCode: '',
-  aisleId: '' as number | '', aisleName: '', aisleCode: '',
-  bayId: '' as number | '', bayName: '', bayCode: '',
-  shelfId: '' as number | '', shelfName: '', shelfCode: '',
+  zoneId: '' as number | '',
+  aisleId: '' as number | '',
+  bayId: '' as number | '',
+  shelfId: '' as number | '',
 }
 
 interface ProductCardProps {
@@ -139,38 +140,34 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
   // Cascading location fields — initialized from session memory
   const [zoneId, _setZoneId] = useState<number | ''>(locationMemory.zoneId)
-  const [zoneName, _setZoneName] = useState(locationMemory.zoneName)
-  const [zoneCode, _setZoneCode] = useState(locationMemory.zoneCode)
   const [aisleId, _setAisleId] = useState<number | ''>(locationMemory.aisleId)
-  const [aisleName, _setAisleName] = useState(locationMemory.aisleName)
-  const [aisleCode, _setAisleCode] = useState(locationMemory.aisleCode)
   const [bayId, _setBayId] = useState<number | ''>(locationMemory.bayId)
-  const [bayName, _setBayName] = useState(locationMemory.bayName)
-  const [bayCode, _setBayCode] = useState(locationMemory.bayCode)
   const [shelfId, _setShelfId] = useState<number | ''>(locationMemory.shelfId)
-  const [shelfName, _setShelfName] = useState(locationMemory.shelfName)
-  const [shelfCode, _setShelfCode] = useState(locationMemory.shelfCode)
+
+  // Create-location dialog state
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createInitialType, setCreateInitialType] = useState<number>(4)
+  const [createInitialParent, setCreateInitialParent] = useState<number | undefined>(undefined)
 
   // Sync helpers — persist to module memory + cascade clear children
-  function setZone(id: number | '', name = '', code = '') {
-    _setZoneId(id); _setZoneName(name); _setZoneCode(code)
-    locationMemory.zoneId = id; locationMemory.zoneName = name; locationMemory.zoneCode = code
-    // Clear children
-    setAisle('', '', '')
+  function setZone(id: number | '') {
+    _setZoneId(id)
+    locationMemory.zoneId = id
+    setAisle('')
   }
-  function setAisle(id: number | '', name = '', code = '') {
-    _setAisleId(id); _setAisleName(name); _setAisleCode(code)
-    locationMemory.aisleId = id; locationMemory.aisleName = name; locationMemory.aisleCode = code
-    setBay('', '', '')
+  function setAisle(id: number | '') {
+    _setAisleId(id)
+    locationMemory.aisleId = id
+    setBay('')
   }
-  function setBay(id: number | '', name = '', code = '') {
-    _setBayId(id); _setBayName(name); _setBayCode(code)
-    locationMemory.bayId = id; locationMemory.bayName = name; locationMemory.bayCode = code
-    setShelf('', '', '')
+  function setBay(id: number | '') {
+    _setBayId(id)
+    locationMemory.bayId = id
+    setShelf('')
   }
-  function setShelf(id: number | '', name = '', code = '') {
-    _setShelfId(id); _setShelfName(name); _setShelfCode(code)
-    locationMemory.shelfId = id; locationMemory.shelfName = name; locationMemory.shelfCode = code
+  function setShelf(id: number | '') {
+    _setShelfId(id)
+    locationMemory.shelfId = id
   }
 
   // Direct action states
@@ -244,42 +241,24 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   }, [showLocationPanel])
 
   async function handleAssignHierarchy() {
+    const finalId = resolveTargetLocation([
+      { id: zoneId, typeId: 4 },
+      { id: aisleId, typeId: 1 },
+      { id: bayId, typeId: 2 },
+      { id: shelfId, typeId: 3 },
+    ])
+    if (!finalId) {
+      flashLocMsg('Select a location level')
+      return
+    }
     setLocBusy(true)
-    let walkerErrored = false
     try {
-      const result = await resolveTargetLocation(
-        [
-          { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
-          { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
-          { id: bayId, name: bayName, code: bayCode, typeId: 2 },
-          { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
-        ],
-        (msg) => { walkerErrored = true; if (mounted.current) flashLocMsg(msg) },
-      )
-      if (!mounted.current) return
-      if (!result) {
-        if (!walkerErrored) flashLocMsg('Select or enter at least one location level')
-        setLocBusy(false)
-        return
-      }
-
-      // Update cascade state with real IDs so newly created locations appear as established picks.
-      // Set from leaf→root to avoid cascade-clearing children we're about to update.
-      const ids = result.resolvedIds
-      if (ids[3] && shelfId === -1) setShelf(ids[3])
-      if (ids[2] && bayId === -1) { _setBayId(ids[2]); _setBayName(''); _setBayCode(''); locationMemory.bayId = ids[2]; locationMemory.bayName = ''; locationMemory.bayCode = '' }
-      if (ids[1] && aisleId === -1) { _setAisleId(ids[1]); _setAisleName(''); _setAisleCode(''); locationMemory.aisleId = ids[1]; locationMemory.aisleName = ''; locationMemory.aisleCode = '' }
-      if (ids[4] && zoneId === -1) { _setZoneId(ids[4]); _setZoneName(''); _setZoneCode(''); locationMemory.zoneId = ids[4]; locationMemory.zoneName = ''; locationMemory.zoneCode = '' }
-
-      const assignRes = await assignItemLocation(result.finalId, item.itemCode)
+      const assignRes = await assignItemLocation(finalId, item.itemCode)
       if (!mounted.current) return
       if (assignRes.success) {
         flashLocMsg('Location assigned')
-        const [all, curr] = await Promise.all([getLocations(), getItemLocations(item.itemCode)])
-        if (mounted.current) {
-          setAllLocations(all.filter(l => l.active))
-          setItemLocations(curr)
-        }
+        const curr = await getItemLocations(item.itemCode)
+        if (mounted.current) setItemLocations(curr)
       } else {
         flashLocMsg(assignRes.message ?? 'Failed to assign')
       }
@@ -287,6 +266,36 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
       if (mounted.current) flashLocMsg((err as Error).message)
     } finally {
       if (mounted.current) setLocBusy(false)
+    }
+  }
+
+  // Open create dialog with context-aware defaults:
+  // pick the deepest empty level, use the deepest picked level as parent
+  function openCreateDialog() {
+    let nextType = 4  // default: Zone
+    let parent: number | undefined = undefined
+    if (zoneId && !aisleId) { nextType = 1; parent = typeof zoneId === 'number' ? zoneId : undefined }
+    else if (aisleId && !bayId) { nextType = 2; parent = typeof aisleId === 'number' ? aisleId : undefined }
+    else if (bayId && !shelfId) { nextType = 3; parent = typeof bayId === 'number' ? bayId : undefined }
+    setCreateInitialType(nextType)
+    setCreateInitialParent(parent)
+    setCreateOpen(true)
+  }
+
+  async function handleLocationCreated(newId: number, typeId: number) {
+    // Reload full location list so dropdowns pick up the new entry
+    try {
+      const all = await getLocations()
+      if (!mounted.current) return
+      setAllLocations(all.filter(l => l.active))
+      // Auto-select the new location at its level
+      if (typeId === 4) setZone(newId)
+      else if (typeId === 1) _setAisleId(newId), (locationMemory.aisleId = newId)
+      else if (typeId === 2) _setBayId(newId), (locationMemory.bayId = newId)
+      else if (typeId === 3) _setShelfId(newId), (locationMemory.shelfId = newId)
+      flashLocMsg('Location created')
+    } catch {
+      flashLocMsg('Created — refresh to see it')
     }
   }
 
@@ -765,50 +774,43 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
                   {/* Cascading location fields — all 4 levels always visible, gap-skipping allowed */}
                   <div className="space-y-2">
-                    <p className="text-[10px] font-semibold text-blue-500 uppercase">Assign Location</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-semibold text-blue-500 uppercase">Assign Location</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openCreateDialog() }}
+                        disabled={locBusy}
+                        className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50 flex items-center gap-0.5"
+                      >
+                        + Create
+                      </button>
+                    </div>
                     <div className="grid grid-cols-4 gap-1.5">
                       <LocationLevelColumn
                         label="Zone"
                         options={zones}
                         selectedId={zoneId}
-                        name={zoneName}
-                        code={zoneCode}
-                        onSelectId={(id) => setZone(id, '', '')}
-                        onName={(v) => { _setZoneName(v); locationMemory.zoneName = v }}
-                        onCode={(v) => { _setZoneCode(v); locationMemory.zoneCode = v }}
+                        onSelectId={setZone}
                         busy={locBusy}
                       />
                       <LocationLevelColumn
                         label="Aisle"
                         options={aisles}
                         selectedId={aisleId}
-                        name={aisleName}
-                        code={aisleCode}
-                        onSelectId={(id) => setAisle(id, '', '')}
-                        onName={(v) => { _setAisleName(v); locationMemory.aisleName = v }}
-                        onCode={(v) => { _setAisleCode(v); locationMemory.aisleCode = v }}
+                        onSelectId={setAisle}
                         busy={locBusy}
                       />
                       <LocationLevelColumn
                         label="Bay"
                         options={bays}
                         selectedId={bayId}
-                        name={bayName}
-                        code={bayCode}
-                        onSelectId={(id) => setBay(id, '', '')}
-                        onName={(v) => { _setBayName(v); locationMemory.bayName = v }}
-                        onCode={(v) => { _setBayCode(v); locationMemory.bayCode = v }}
+                        onSelectId={setBay}
                         busy={locBusy}
                       />
                       <LocationLevelColumn
-                        label="Row"
+                        label="Shelf"
                         options={shelves}
                         selectedId={shelfId}
-                        name={shelfName}
-                        code={shelfCode}
-                        onSelectId={(id) => setShelf(id, '', '')}
-                        onName={(v) => { _setShelfName(v); locationMemory.shelfName = v }}
-                        onCode={(v) => { _setShelfCode(v); locationMemory.shelfCode = v }}
+                        onSelectId={setShelf}
                         busy={locBusy}
                       />
                     </div>
@@ -816,10 +818,10 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     <button
                       onClick={(e) => { e.stopPropagation(); handleAssignHierarchy() }}
                       disabled={locBusy || !hasAnyCascadeInput([
-                        { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
-                        { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
-                        { id: bayId, name: bayName, code: bayCode, typeId: 2 },
-                        { id: shelfId, name: shelfName, code: shelfCode, typeId: 3 },
+                        { id: zoneId, typeId: 4 },
+                        { id: aisleId, typeId: 1 },
+                        { id: bayId, typeId: 2 },
+                        { id: shelfId, typeId: 3 },
                       ])}
                       className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
@@ -827,6 +829,15 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       {locBusy ? 'Assigning...' : 'Assign Location'}
                     </button>
                   </div>
+
+                  <CreateLocationDialog
+                    open={createOpen}
+                    onClose={() => setCreateOpen(false)}
+                    onCreated={handleLocationCreated}
+                    allLocations={allLocations}
+                    initialTypeId={createInitialType}
+                    initialParentId={createInitialParent}
+                  />
 
                   {locMsg && (
                     <p className={`text-[11px] font-medium ${locMsg.includes('Failed') || locMsg.includes('fail') ? 'text-red-600' : 'text-green-600'}`}>
