@@ -5,7 +5,11 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  base: './',
+  // In CI, VITE_BASE_PATH is set to /<repo-name>/ (absolute) so that both
+  // index.html and crew/index.html resolve assets from the same /assets/ root.
+  // With base: './' each sub-page would look for assets relative to its own
+  // folder (/crew/assets/…) which doesn't exist. Fallback to './' for dev.
+  base: process.env.VITE_BASE_PATH ?? './',
   build: {
     target: ['es2020', 'safari15'],
     rollupOptions: {
