@@ -131,7 +131,6 @@ function pickString(o: Record<string, unknown>, keys: string[]): string | null {
 const TYPE_KEYS = ['typeId', 'type', 'typeID', 'levelId', 'level', 'locationTypeId', 'locationType']
 const NAME_KEYS = ['name', 'locationName', 'displayName', 'label', 'title']
 const CODE_KEYS = ['shortCode', 'code', 'short', 'shortcode', 'locationCode']
-const PARENT_KEYS = ['parentId', 'parent', 'parentID', 'parent_id', 'parentLocationId']
 const ID_KEYS = ['locationId', 'id', 'locationID', 'location_id']
 const PATH_KEYS = ['path', 'fullPath', 'breadcrumb', 'hierarchy']
 
