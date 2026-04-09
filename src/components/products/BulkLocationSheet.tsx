@@ -226,7 +226,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                   Manage
                 </button>
               </div>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="space-y-2.5">
                 <LocationLevelColumn
                   label="Zone"
                   options={zones}

@@ -7,9 +7,14 @@ export interface LevelOption {
   path: string
 }
 
-// ─── Per-level column: existing-only dropdown ───────────────────────────────
+// ─── Per-level row: chip-button picker ──────────────────────────────────────
 //
-// Dropdown values:
+// Tap-friendly: each option is a real <button>, not a native <select>. Native
+// <select> can be flaky inside scrollable PWA panels on Android — buttons
+// always respond to taps and visibly show the picked state. Tap a picked chip
+// to clear it.
+//
+// Selection values:
 //   ''  → nothing picked (skipped on submit)
 //   >0  → existing location id
 //
@@ -31,24 +36,44 @@ export function LocationLevelColumn({
   const isEmpty = options.length === 0
   return (
     <div className="space-y-1 min-w-0">
-      <label className="text-[10px] font-semibold text-blue-500 uppercase block truncate">{label}</label>
-      <select
-        value={selectedId === '' ? '' : String(selectedId)}
-        onChange={e => {
-          const v = e.target.value ? Number(e.target.value) : ''
-          onSelectId(v)
-        }}
-        onClick={e => e.stopPropagation()}
-        disabled={busy || isEmpty}
-        className={`w-full border-2 rounded-lg px-2 py-2 text-xs bg-white focus:ring-2 focus:ring-blue-400 disabled:opacity-50 truncate ${
-          selectedId !== '' ? 'border-blue-500 font-semibold text-blue-700' : 'border-blue-200 text-gray-700'
-        }`}
-      >
-        <option value="">{isEmpty ? '(none)' : '—'}</option>
-        {options.map(o => (
-          <option key={o.id} value={o.id}>{o.shortCode || o.name}</option>
-        ))}
-      </select>
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-[10px] font-semibold text-blue-500 uppercase block truncate">{label}</label>
+        {selectedId !== '' && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onSelectId('') }}
+            disabled={busy}
+            className="text-[9px] font-semibold text-gray-400 hover:text-gray-600 disabled:opacity-50"
+          >
+            clear
+          </button>
+        )}
+      </div>
+      {isEmpty ? (
+        <p className="text-[10px] text-gray-400 italic px-1 py-1">(none)</p>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {options.map(o => {
+            const picked = selectedId === o.id
+            return (
+              <button
+                key={o.id}
+                type="button"
+                disabled={busy}
+                onClick={(e) => { e.stopPropagation(); onSelectId(picked ? '' : o.id) }}
+                className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold border-2 transition-colors disabled:opacity-50 ${
+                  picked
+                    ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
+                    : 'bg-white text-blue-700 border-blue-200 hover:border-blue-400 active:bg-blue-50'
+                }`}
+                title={o.path}
+              >
+                {o.shortCode || o.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

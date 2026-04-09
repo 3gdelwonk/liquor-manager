@@ -155,6 +155,8 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   // True when the user clicked "Add Location" to begin a fresh assignment.
   // The cascade picker is only visible when one of these flags is active.
   const [addingNew, setAddingNew] = useState(false)
+  // Picker collapsed state — user can toggle the chip rows hidden/shown.
+  const [pickerCollapsed, setPickerCollapsed] = useState(false)
 
   // Sync helpers — persist to module memory + cascade clear children
   function setZone(id: number | '') {
@@ -340,11 +342,13 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
       if (typeof c === 'string' && /^\d+$/.test(c)) { id = Number(c); break }
     }
     setEditingLocationId(id)
+    setPickerCollapsed(false)
   }
 
   function cancelEditLocation() {
     setEditingLocationId(null)
     setAddingNew(false)
+    setPickerCollapsed(false)
     _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
     locationMemory.zoneId = ''; locationMemory.aisleId = ''
     locationMemory.bayId = ''; locationMemory.shelfId = ''
@@ -353,6 +357,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   function startAddNewLocation() {
     setEditingLocationId(null)
     setAddingNew(true)
+    setPickerCollapsed(false)
     _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
     locationMemory.zoneId = ''; locationMemory.aisleId = ''
     locationMemory.bayId = ''; locationMemory.shelfId = ''
@@ -931,10 +936,15 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                   {/* Cascade picker — only visible when adding new or changing existing */}
                   {(addingNew || editingLocationId != null) && (
                     <div className="space-y-2 bg-white rounded-lg p-3 ring-2 ring-blue-400 shadow-md">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold text-blue-700 uppercase">
-                          {editingLocationId != null ? '↓ Pick New Location ↓' : '↓ Pick Location ↓'}
-                        </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setPickerCollapsed(c => !c) }}
+                          className="flex items-center gap-1 text-xs font-bold text-blue-700 uppercase hover:text-blue-900"
+                        >
+                          {pickerCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                          {editingLocationId != null ? 'Pick New Location' : 'Pick Location'}
+                        </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); cancelEditLocation() }}
                           disabled={locBusy}
@@ -944,42 +954,56 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                         </button>
                       </div>
 
-                      {/* Option-count debug strip — confirms dropdowns have data */}
-                      <p className="text-[9px] text-gray-500 font-mono">
-                        Z:{zones.length} A:{aisles.length} B:{bays.length} R:{shelves.length}
-                        {flatLocs.length === 0 && ' ⚠ no locations loaded'}
-                      </p>
+                      {pickerCollapsed ? (
+                        // Collapsed summary — show what's currently picked at a glance
+                        <p className="text-[11px] text-gray-600 font-mono">
+                          {[
+                            zoneId !== '' && zones.find(z => z.id === zoneId)?.shortCode,
+                            aisleId !== '' && aisles.find(a => a.id === aisleId)?.shortCode,
+                            bayId !== '' && bays.find(b => b.id === bayId)?.shortCode,
+                            shelfId !== '' && shelves.find(s => s.id === shelfId)?.shortCode,
+                          ].filter(Boolean).join(' › ') || <span className="italic text-gray-400">nothing picked yet</span>}
+                        </p>
+                      ) : (
+                        <>
+                          {/* Option-count debug strip — confirms picker has data */}
+                          <p className="text-[9px] text-gray-500 font-mono">
+                            Z:{zones.length} A:{aisles.length} B:{bays.length} R:{shelves.length}
+                            {flatLocs.length === 0 && ' ⚠ no locations loaded'}
+                          </p>
 
-                      <div className="grid grid-cols-4 gap-1.5">
-                        <LocationLevelColumn
-                          label="Zone"
-                          options={zones}
-                          selectedId={zoneId}
-                          onSelectId={setZone}
-                          busy={locBusy}
-                        />
-                        <LocationLevelColumn
-                          label="Aisle"
-                          options={aisles}
-                          selectedId={aisleId}
-                          onSelectId={setAisle}
-                          busy={locBusy}
-                        />
-                        <LocationLevelColumn
-                          label="Bay"
-                          options={bays}
-                          selectedId={bayId}
-                          onSelectId={setBay}
-                          busy={locBusy}
-                        />
-                        <LocationLevelColumn
-                          label="Row"
-                          options={shelves}
-                          selectedId={shelfId}
-                          onSelectId={setShelf}
-                          busy={locBusy}
-                        />
-                      </div>
+                          <div className="space-y-2.5">
+                            <LocationLevelColumn
+                              label="Zone"
+                              options={zones}
+                              selectedId={zoneId}
+                              onSelectId={setZone}
+                              busy={locBusy}
+                            />
+                            <LocationLevelColumn
+                              label="Aisle"
+                              options={aisles}
+                              selectedId={aisleId}
+                              onSelectId={setAisle}
+                              busy={locBusy}
+                            />
+                            <LocationLevelColumn
+                              label="Bay"
+                              options={bays}
+                              selectedId={bayId}
+                              onSelectId={setBay}
+                              busy={locBusy}
+                            />
+                            <LocationLevelColumn
+                              label="Row"
+                              options={shelves}
+                              selectedId={shelfId}
+                              onSelectId={setShelf}
+                              busy={locBusy}
+                            />
+                          </div>
+                        </>
+                      )}
 
                       <button
                         onClick={(e) => { e.stopPropagation(); handleAssignHierarchy() }}
