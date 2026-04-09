@@ -100,17 +100,25 @@ export interface CascadeLevel {
   typeId: number
 }
 
+export interface ResolveResult {
+  finalId: number
+  /** Real IDs for each level (keyed by typeId). Only includes levels that resolved. */
+  resolvedIds: Record<number, number>
+}
+
 export async function resolveTargetLocation(
   levels: CascadeLevel[],
   onError: (msg: string) => void,
-): Promise<number | null> {
+): Promise<ResolveResult | null> {
   let parentId: number | undefined = undefined
   let finalId: number | undefined = undefined
+  const resolvedIds: Record<number, number> = {}
 
   for (const level of levels) {
     if (typeof level.id === 'number' && level.id > 0) {
       parentId = level.id
       finalId = level.id
+      resolvedIds[level.typeId] = level.id
     } else if (level.id === -1 && level.name.trim() && level.code.trim()) {
       const res = await createLocation(
         level.name.trim(),
@@ -124,11 +132,12 @@ export async function resolveTargetLocation(
       }
       parentId = res.id
       finalId = res.id
+      resolvedIds[level.typeId] = res.id
     }
     // else: empty / incomplete new → skip, parent unchanged
   }
 
-  return finalId ?? null
+  return finalId != null ? { finalId, resolvedIds } : null
 }
 
 // ─── Convenience predicate: does the user have any usable input? ────────────

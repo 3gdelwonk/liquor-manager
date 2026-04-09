@@ -247,7 +247,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     setLocBusy(true)
     let walkerErrored = false
     try {
-      const finalId = await resolveTargetLocation(
+      const result = await resolveTargetLocation(
         [
           { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
           { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
@@ -257,13 +257,21 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
         (msg) => { walkerErrored = true; if (mounted.current) flashLocMsg(msg) },
       )
       if (!mounted.current) return
-      if (!finalId) {
+      if (!result) {
         if (!walkerErrored) flashLocMsg('Select or enter at least one location level')
         setLocBusy(false)
         return
       }
 
-      const assignRes = await assignItemLocation(finalId, item.itemCode)
+      // Update cascade state with real IDs so newly created locations appear as established picks.
+      // Set from leaf→root to avoid cascade-clearing children we're about to update.
+      const ids = result.resolvedIds
+      if (ids[3] && shelfId === -1) setShelf(ids[3])
+      if (ids[2] && bayId === -1) { _setBayId(ids[2]); _setBayName(''); _setBayCode(''); locationMemory.bayId = ids[2]; locationMemory.bayName = ''; locationMemory.bayCode = '' }
+      if (ids[1] && aisleId === -1) { _setAisleId(ids[1]); _setAisleName(''); _setAisleCode(''); locationMemory.aisleId = ids[1]; locationMemory.aisleName = ''; locationMemory.aisleCode = '' }
+      if (ids[4] && zoneId === -1) { _setZoneId(ids[4]); _setZoneName(''); _setZoneCode(''); locationMemory.zoneId = ids[4]; locationMemory.zoneName = ''; locationMemory.zoneCode = '' }
+
+      const assignRes = await assignItemLocation(result.finalId, item.itemCode)
       if (!mounted.current) return
       if (assignRes.success) {
         flashLocMsg('Location assigned')

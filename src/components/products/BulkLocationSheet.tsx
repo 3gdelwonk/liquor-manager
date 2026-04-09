@@ -125,7 +125,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     setResult(null)
     let walkerErrored = false
     try {
-      const targetId = await resolveTargetLocation(
+      const result = await resolveTargetLocation(
         [
           { id: zoneId, name: zoneName, code: zoneCode, typeId: 4 },
           { id: aisleId, name: aisleName, code: aisleCode, typeId: 1 },
@@ -134,17 +134,24 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         ],
         (msg) => { walkerErrored = true; setError(msg) },
       )
-      if (!targetId) {
+      if (!result) {
         if (!walkerErrored) setError('Select or create at least one location level')
         setProcessing(false)
         return
       }
 
+      // Update cascade state with real IDs so newly created locations appear as established picks
+      const ids = result.resolvedIds
+      if (ids[4] && zoneId === -1) { setZoneId(ids[4]); setZoneName(''); setZoneCode('') }
+      if (ids[1] && aisleId === -1) { setAisleId(ids[1]); setAisleName(''); setAisleCode('') }
+      if (ids[2] && bayId === -1) { setBayId(ids[2]); setBayName(''); setBayCode('') }
+      if (ids[3] && shelfId === -1) { setShelfId(ids[3]); setShelfName(''); setShelfCode('') }
+
       // Reload locations so any newly-created levels are reflected in the dropdowns
       const updated = await getLocations()
       setLocations(updated.filter(l => l.active))
 
-      const res = await bulkAssignLocation(targetId, entries.map(e => e.itemCode))
+      const res = await bulkAssignLocation(result.finalId, entries.map(e => e.itemCode))
       if (res.success) {
         setResult({
           ok: res.assigned ?? entries.length,
