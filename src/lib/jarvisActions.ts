@@ -353,46 +353,131 @@ function extractMsg(o: Record<string, unknown>): string | undefined {
   return typeof v === 'string' ? v : undefined
 }
 
+// Shared success normalizer for mutation endpoints. The JARVISmart server
+// uses inconsistent shapes (ok/success/updated/done/removed/moved, error/err),
+// and sometimes returns bare 200 OK with an empty body. This treats
+// "no error returned" as success, which matches how the PUT/POST/DELETE
+// helpers already throw on non-2xx.
+function normalizeMutation(res: unknown): { success: boolean; message?: string } {
+  if (res == null || typeof res !== 'object') {
+    // Empty/null body on a 2xx is treated as success
+    return { success: true }
+  }
+  const o = res as Record<string, unknown>
+  const err = extractErr(o)
+  const msg = extractMsg(o)
+  const explicit =
+    o.ok === true ||
+    o.success === true ||
+    o.updated === true ||
+    o.created === true ||
+    o.removed === true ||
+    o.deleted === true ||
+    o.moved === true ||
+    o.assigned === true
+  const success = explicit || err == null
+  return { success, message: err ?? msg }
+}
+
 export async function deleteLocation(
   locationId: number
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisDelete(`/api/pos/locations/${locationId}`)
+): Promise<{ success: boolean; message?: string; raw?: unknown }> {
+  try {
+    const res = await jarvisDelete<Record<string, unknown>>(`/api/pos/locations/${locationId}`)
+    console.log('[deleteLocation] →', res)
+    return { ...normalizeMutation(res), raw: res }
+  } catch (err) {
+    console.error('[deleteLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
 }
 
 export async function assignItemLocation(
   locationId: number,
   itemCode: string
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisPost(`/api/pos/locations/${locationId}/items`, { itemCode })
+): Promise<{ success: boolean; message?: string; raw?: unknown }> {
+  try {
+    const res = await jarvisPost<Record<string, unknown>>(
+      `/api/pos/locations/${locationId}/items`,
+      { itemCode }
+    )
+    console.log('[assignItemLocation] →', res)
+    return { ...normalizeMutation(res), raw: res }
+  } catch (err) {
+    console.error('[assignItemLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
 }
 
 export async function removeItemLocation(
   locationId: number,
   itemCode: string
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisDelete(`/api/pos/locations/${locationId}/items/${encodeURIComponent(itemCode)}`)
+): Promise<{ success: boolean; message?: string; raw?: unknown }> {
+  try {
+    const res = await jarvisDelete<Record<string, unknown>>(
+      `/api/pos/locations/${locationId}/items/${encodeURIComponent(itemCode)}`
+    )
+    console.log('[removeItemLocation] →', res)
+    return { ...normalizeMutation(res), raw: res }
+  } catch (err) {
+    console.error('[removeItemLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
 }
 
 export async function moveItemLocation(
   locationId: number,
   itemCode: string,
   newLocationId: number
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisPut(`/api/pos/locations/${locationId}/move`, { itemCode, newLocationId })
+): Promise<{ success: boolean; message?: string; raw?: unknown }> {
+  try {
+    const res = await jarvisPut<Record<string, unknown>>(
+      `/api/pos/locations/${locationId}/move`,
+      { itemCode, newLocationId }
+    )
+    console.log('[moveItemLocation] →', res)
+    return { ...normalizeMutation(res), raw: res }
+  } catch (err) {
+    console.error('[moveItemLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
 }
 
 export async function bulkMoveLocation(
   locationId: number,
   itemCodes: string[]
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisPut(`/api/pos/locations/${locationId}/bulk-move`, { itemCodes })
+): Promise<{ success: boolean; message?: string; raw?: unknown }> {
+  try {
+    const res = await jarvisPut<Record<string, unknown>>(
+      `/api/pos/locations/${locationId}/bulk-move`,
+      { itemCodes }
+    )
+    console.log('[bulkMoveLocation] →', res)
+    return { ...normalizeMutation(res), raw: res }
+  } catch (err) {
+    console.error('[bulkMoveLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
 }
 
 export async function bulkAssignLocation(
   locationId: number,
   itemCodes: string[]
-): Promise<{ success: boolean; assigned?: number; message?: string }> {
-  return jarvisPost(`/api/pos/locations/${locationId}/bulk-assign`, { itemCodes })
+): Promise<{ success: boolean; assigned?: number; message?: string; raw?: unknown }> {
+  try {
+    const res = await jarvisPost<Record<string, unknown>>(
+      `/api/pos/locations/${locationId}/bulk-assign`,
+      { itemCodes }
+    )
+    console.log('[bulkAssignLocation] →', res)
+    const norm = normalizeMutation(res)
+    const assignedRaw = res.assigned
+    const assigned = typeof assignedRaw === 'number' ? assignedRaw : undefined
+    return { ...norm, assigned, raw: res }
+  } catch (err) {
+    console.error('[bulkAssignLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
 }
 
 export async function assignDepartmentToLocation(

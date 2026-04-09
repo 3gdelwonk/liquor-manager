@@ -174,7 +174,13 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
           message: res.message ?? `${res.assigned ?? entries.length} item(s) assigned`,
         })
       } else {
-        setResult({ ok: 0, failed: entries.length, message: res.message ?? 'Failed to assign' })
+        // Surface server response detail so the user can diagnose on phone (no F12)
+        const detail = res.message || (res.raw ? JSON.stringify(res.raw) : 'no detail')
+        setResult({
+          ok: 0,
+          failed: entries.length,
+          message: `Server refused: ${detail} (location #${targetId})`,
+        })
       }
     } catch (err) {
       setResult({ ok: 0, failed: entries.length, message: (err as Error).message })

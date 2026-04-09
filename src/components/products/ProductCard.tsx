@@ -184,7 +184,9 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   function flashLocMsg(msg: string) {
     setLocMsg(msg)
     clearTimeout(msgTimer.current)
-    msgTimer.current = setTimeout(() => { if (mounted.current) setLocMsg(null) }, 3000)
+    // Longer timeout for error-like messages so users can read full detail on phone
+    const isError = /refused|failed|error/i.test(msg)
+    msgTimer.current = setTimeout(() => { if (mounted.current) setLocMsg(null) }, isError ? 10000 : 3000)
   }
 
   const status = statusLabel(item.onHand, item.reorderLevel)
@@ -260,7 +262,9 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
         const curr = await getItemLocations(item.itemCode)
         if (mounted.current) setItemLocations(curr)
       } else {
-        flashLocMsg(assignRes.message ?? 'Failed to assign')
+        // Surface raw server detail on phone (no F12)
+        const detail = assignRes.message || (assignRes.raw ? JSON.stringify(assignRes.raw) : 'no detail')
+        flashLocMsg(`Assign refused: ${detail}`)
       }
     } catch (err) {
       if (mounted.current) flashLocMsg((err as Error).message)
