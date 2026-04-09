@@ -288,10 +288,39 @@ export async function createLocation(
   shortCode: string,
   typeId: number,
   parentId?: number
-): Promise<{ success: boolean; id?: number; message?: string }> {
+): Promise<{ success: boolean; id?: number; message?: string; raw?: unknown }> {
   const body: Record<string, unknown> = { name, shortCode, typeId }
   if (parentId) body.parentId = parentId
-  return jarvisPost('/api/pos/locations', body)
+  try {
+    const res = await jarvisPost<{
+      ok?: boolean
+      success?: boolean
+      created?: boolean
+      id?: number
+      locationId?: number
+      insertId?: number
+      location?: { id?: number }
+      error?: string
+      message?: string
+    }>('/api/pos/locations', body)
+    // Log raw response so network failures are easier to diagnose
+    console.log('[createLocation] POST /api/pos/locations →', res)
+    const id = res.id ?? res.locationId ?? res.insertId ?? res.location?.id
+    const success =
+      res.ok === true ||
+      res.success === true ||
+      res.created === true ||
+      (id != null && res.error == null)
+    return {
+      success,
+      id,
+      message: res.message ?? res.error,
+      raw: res,
+    }
+  } catch (err) {
+    console.error('[createLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
 }
 
 export async function updateLocation(

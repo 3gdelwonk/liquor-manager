@@ -95,8 +95,12 @@ export default function CreateLocationDialog({
       if (res.success && res.id) {
         onCreated(res.id, typeId)
         onClose()
+      } else if (res.message) {
+        setError(res.message)
       } else {
-        setError(res.message || 'Server rejected the create request')
+        // Unexpected shape — surface the raw JSON so we can see what the server returned
+        const rawStr = res.raw ? JSON.stringify(res.raw) : '(empty)'
+        setError(`Unexpected server response: ${rawStr}`)
       }
     } catch (err) {
       setError((err as Error).message)
