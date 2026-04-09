@@ -1,9 +1,8 @@
 import { Component, useState, type ReactNode } from 'react'
-import { Package, ScanBarcode, CalendarClock, MapPin } from 'lucide-react'
+import { Package, ScanBarcode, CalendarClock } from 'lucide-react'
 import CrewStockView from './components/crew/CrewStockView'
 import CrewScanView from './components/crew/CrewScanView'
 import CrewExpiryView from './components/crew/CrewExpiryView'
-import CrewLocationView from './components/crew/CrewLocationView'
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 
@@ -31,20 +30,18 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 // ─── Crew App ─────────────────────────────────────────────────────────────────
 
-type CrewTab = 'stock' | 'scan' | 'expiry' | 'locations'
+type CrewTab = 'stock' | 'scan' | 'expiry'
 
 const CREW_TABS: { id: CrewTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'stock',     label: 'Stock',     icon: <Package size={18} /> },
-  { id: 'scan',      label: 'Scan',      icon: <ScanBarcode size={18} /> },
-  { id: 'expiry',    label: 'Expiry',    icon: <CalendarClock size={18} /> },
-  { id: 'locations', label: 'Locations', icon: <MapPin size={18} /> },
+  { id: 'stock',  label: 'Stock',  icon: <Package size={18} /> },
+  { id: 'scan',   label: 'Scan',   icon: <ScanBarcode size={18} /> },
+  { id: 'expiry', label: 'Expiry', icon: <CalendarClock size={18} /> },
 ]
 
 const TAB_TITLES: Record<CrewTab, string> = {
-  stock:     'Stock',
-  scan:      'Quick Scan',
-  expiry:    'Expiry Tracker',
-  locations: 'Locations',
+  stock:  'Stock',
+  scan:   'Quick Scan',
+  expiry: 'Expiry Tracker',
 }
 
 export default function CrewAppStandalone() {
@@ -66,10 +63,9 @@ export default function CrewAppStandalone() {
 
   const renderTab = () => {
     switch (activeTab) {
-      case 'stock':     return <CrewStockView />
-      case 'scan':      return <CrewScanView />
-      case 'expiry':    return <CrewExpiryView />
-      case 'locations': return <CrewLocationView />
+      case 'stock':  return <CrewStockView />
+      case 'scan':   return <CrewScanView />
+      case 'expiry': return <CrewExpiryView />
     }
   }
 

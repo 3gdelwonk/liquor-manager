@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { MapPin, Printer, CalendarClock, Package, ChevronDown, Loader2, CheckCircle, X, AlertTriangle } from 'lucide-react'
-import type { StockItem, LivePromotion, ItemLocation } from '../../lib/jarvis'
-import { getItemLocations } from '../../lib/jarvis'
-import { formatItemLocation } from '../../lib/locationUtils'
-import { adjustStock } from '../../lib/jarvisActions'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { MapPin, Printer, CalendarClock, Package, ChevronDown, ChevronUp, Loader2, CheckCircle, X, AlertTriangle, Pencil, Trash2 } from 'lucide-react'
+import type { StockItem, LivePromotion, ItemLocation, StockLocation } from '../../lib/jarvis'
+import { getItemLocations, getLocations } from '../../lib/jarvis'
+import { buildLocationTree, flattenLocations, buildItemBreadcrumb } from '../../lib/locationUtils'
+import { adjustStock, assignItemLocation, removeItemLocation } from '../../lib/jarvisActions'
+import { LocationLevelColumn, hasAnyCascadeInput } from '../products/LocationCascade'
+import LocationManagerDialog, { type CreatedLocation } from '../products/LocationManagerDialog'
 import { db, type ExpiryRecord } from '../../lib/db'
 import ProductImage from '../ProductImage'
 
@@ -45,6 +47,7 @@ export default function CrewProductCard({ item, promo, onPrintLabel }: CrewProdu
   const [expiries, setExpiries] = useState<ExpiryRecord[]>([])
   const [showAdjust, setShowAdjust] = useState(false)
   const [showExpiry, setShowExpiry] = useState(false)
+  const [showLocation, setShowLocation] = useState(false)
   const mounted = useRef(true)
   const detailLoaded = useRef(false)
 
@@ -145,21 +148,6 @@ export default function CrewProductCard({ item, promo, onPrintLabel }: CrewProdu
             </div>
           )}
 
-          {/* Location */}
-          <div className="flex items-start gap-2">
-            <MapPin size={14} className="text-blue-500 mt-0.5 shrink-0" />
-            <div className="text-xs text-gray-600">
-              {locations.length > 0
-                ? locations.map(l => (
-                    <span key={l.locationId} className="inline-block mr-2">
-                      {formatItemLocation(l)}
-                    </span>
-                  ))
-                : <span className="text-gray-400">No location set</span>
-              }
-            </div>
-          </div>
-
           {/* Expiry dates */}
           <div className="flex items-start gap-2">
             <CalendarClock size={14} className="text-orange-500 mt-0.5 shrink-0" />
@@ -191,8 +179,8 @@ export default function CrewProductCard({ item, promo, onPrintLabel }: CrewProdu
             <p className="text-center text-xs text-gray-400 font-mono">{item.barcode}</p>
           )}
 
-          {/* Action buttons */}
-          <div className="grid grid-cols-3 gap-2">
+          {/* Action buttons — 2×2 grid */}
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={(e) => { e.stopPropagation(); setShowAdjust(true) }}
               className="flex items-center justify-center gap-1.5 py-2.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
@@ -206,6 +194,22 @@ export default function CrewProductCard({ item, promo, onPrintLabel }: CrewProdu
             >
               <CalendarClock size={14} />
               <span className="text-xs font-semibold">Expiry</span>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowLocation(true) }}
+              className={`relative flex items-center justify-center gap-1.5 py-2.5 rounded-lg transition-colors ${
+                locations.length > 0
+                  ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  : 'bg-blue-50 text-blue-500 hover:bg-blue-100'
+              }`}
+            >
+              <MapPin size={14} />
+              <span className="text-xs font-semibold">
+                {locations.length > 0 ? `Location (${locations.length})` : 'Location'}
+              </span>
+              {locations.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-500 border border-white" />
+              )}
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onPrintLabel() }}
@@ -233,6 +237,16 @@ export default function CrewProductCard({ item, promo, onPrintLabel }: CrewProdu
           expiries={expiries}
           onClose={() => setShowExpiry(false)}
           onUpdate={(updated) => setExpiries(updated)}
+        />
+      )}
+
+      {/* Location sheet */}
+      {showLocation && (
+        <LocationSheet
+          item={item}
+          itemLocations={locations}
+          onClose={() => setShowLocation(false)}
+          onLocationsChange={(locs) => setLocations(locs)}
         />
       )}
     </div>
@@ -500,6 +514,264 @@ function ExpirySheet({ item, expiries, onClose, onUpdate }: {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Location Sheet ─────────────────────────────────────────────────────────
+function LocationSheet({ item, itemLocations, onClose, onLocationsChange }: {
+  item: StockItem
+  itemLocations: ItemLocation[]
+  onClose: () => void
+  onLocationsChange: (locs: ItemLocation[]) => void
+}) {
+  const [allLocs, setAllLocs] = useState<StockLocation[]>([])
+  const [locs, setLocs] = useState<ItemLocation[]>(itemLocations)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+
+  // Cascade state
+  const [zoneId, setZoneId]   = useState<number | ''>('')
+  const [aisleId, setAisleId] = useState<number | ''>('')
+  const [bayId, setBayId]     = useState<number | ''>('')
+  const [shelfId, setShelfId] = useState<number | ''>('')
+  const [editingLocId, setEditingLocId]   = useState<number | null>(null)
+  const [pickerOpen, setPickerOpen]       = useState(false)
+  const [pickerCollapsed, setPickerCollapsed] = useState(false)
+  const [managerOpen, setManagerOpen]     = useState(false)
+
+  const flatLocs = useMemo(() => flattenLocations(buildLocationTree(allLocs)), [allLocs])
+  const zones  = useMemo(() => flatLocs.filter(l => l.typeId === 4), [flatLocs])
+  const aisles = useMemo(() => flatLocs.filter(l => l.typeId === 1 && (zoneId  === '' || l.parentId === zoneId)),  [flatLocs, zoneId])
+  const bays   = useMemo(() => flatLocs.filter(l => l.typeId === 2 && (aisleId === '' || l.parentId === aisleId)), [flatLocs, aisleId])
+  const shelves= useMemo(() => flatLocs.filter(l => l.typeId === 3 && (bayId   === '' || l.parentId === bayId)),   [flatLocs, bayId])
+
+  useEffect(() => {
+    getLocations()
+      .then(all => setAllLocs(all.filter(l => l.active !== false)))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  function clearPicker() {
+    setZoneId(''); setAisleId(''); setBayId(''); setShelfId('')
+  }
+  function openAdd() {
+    clearPicker(); setEditingLocId(null); setPickerOpen(true); setPickerCollapsed(false)
+  }
+  function openEdit(loc: ItemLocation) {
+    clearPicker()
+    const o = loc as unknown as Record<string, unknown>
+    const cands = [o.locationId, o.id, o.locationID, o.location_id]
+    let id: number | null = null
+    for (const c of cands) {
+      if (typeof c === 'number') { id = c; break }
+      if (typeof c === 'string' && /^\d+$/.test(c)) { id = Number(c); break }
+    }
+    setEditingLocId(id); setPickerOpen(true); setPickerCollapsed(false)
+  }
+  function cancelPicker() {
+    setPickerOpen(false); setEditingLocId(null); clearPicker()
+  }
+
+  // Deepest picked id
+  function resolveTarget(): number | null {
+    for (const id of [shelfId, bayId, aisleId, zoneId]) {
+      if (typeof id === 'number' && id > 0) return id
+    }
+    return null
+  }
+
+  async function handleApply() {
+    const finalId = resolveTarget()
+    if (!finalId) return
+    setBusy(true); setMsg(null)
+    try {
+      if (editingLocId != null) {
+        const rem = await removeItemLocation(editingLocId, item.itemCode)
+        if (!rem.success) { setMsg({ text: rem.message ?? 'Remove failed', ok: false }); return }
+      }
+      const res = await assignItemLocation(finalId, item.itemCode)
+      if (res.success) {
+        const updated = await getItemLocations(item.itemCode)
+        setLocs(updated); onLocationsChange(updated)
+        setMsg({ text: 'Location updated', ok: true })
+        cancelPicker()
+      } else {
+        setMsg({ text: res.message ?? 'Assign failed', ok: false })
+      }
+    } catch (err) {
+      setMsg({ text: (err as Error).message, ok: false })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRemove(loc: ItemLocation) {
+    setBusy(true); setMsg(null)
+    try {
+      const res = await removeItemLocation(loc.locationId, item.itemCode)
+      if (res.success) {
+        const updated = locs.filter(l => l.locationId !== loc.locationId)
+        setLocs(updated); onLocationsChange(updated)
+        setMsg({ text: 'Removed', ok: true })
+      } else {
+        setMsg({ text: res.message ?? 'Remove failed', ok: false })
+      }
+    } catch (err) {
+      setMsg({ text: (err as Error).message, ok: false })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const canApply = hasAnyCascadeInput([
+    { id: zoneId, typeId: 4 }, { id: aisleId, typeId: 1 },
+    { id: bayId, typeId: 2 },  { id: shelfId, typeId: 3 },
+  ])
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-t-2xl flex flex-col max-h-[85vh] pb-safe">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+          <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            <MapPin size={15} className="text-blue-500" /> Location
+          </h2>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setManagerOpen(true)}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-800"
+            >
+              Manage
+            </button>
+            <button onClick={onClose} className="text-gray-400"><X size={18} /></button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
+          <p className="text-xs text-gray-500 truncate">{item.description}</p>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+              <Loader2 size={12} className="animate-spin" /> Loading…
+            </div>
+          ) : (
+            <>
+              {/* Current locations */}
+              {locs.length === 0 ? (
+                <p className="text-xs text-gray-400">No location assigned</p>
+              ) : (
+                <div className="space-y-2">
+                  {locs.map(loc => {
+                    const bc = buildItemBreadcrumb(loc, flatLocs)
+                    return (
+                      <div key={loc.locationId} className="bg-blue-50 rounded-xl px-3 py-2.5">
+                        <div className="grid grid-cols-4 gap-2 mb-2">
+                          {([4, 1, 2, 3] as const).map(tid => {
+                            const cell = bc[tid]
+                            const labels: Record<number, string> = { 4: 'Zone', 1: 'Aisle', 2: 'Bay', 3: 'Row' }
+                            const display = cell.shortCode ?? cell.name
+                            return (
+                              <div key={tid} className="min-w-0">
+                                <p className="text-[8px] font-semibold text-blue-400 uppercase">{labels[tid]}</p>
+                                <p className={`text-[11px] font-semibold truncate ${display ? 'text-blue-800' : 'text-blue-300'}`}>
+                                  {display ?? '—'}
+                                </p>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEdit(loc)}
+                            disabled={busy}
+                            className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-50"
+                          >
+                            <Pencil size={11} /> Change
+                          </button>
+                          <button
+                            onClick={() => handleRemove(loc)}
+                            disabled={busy}
+                            className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Add button (only when no picker open and no location yet) */}
+              {!pickerOpen && locs.length === 0 && (
+                <button
+                  onClick={openAdd}
+                  className="w-full py-2.5 bg-blue-600 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5"
+                >
+                  <MapPin size={13} /> Add Location
+                </button>
+              )}
+
+              {/* Cascade picker */}
+              {pickerOpen && (
+                <div className="bg-blue-50 rounded-xl p-3 space-y-2.5 ring-2 ring-blue-400">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setPickerCollapsed(c => !c)}
+                      className="flex items-center gap-1 text-xs font-bold text-blue-700 uppercase"
+                    >
+                      {pickerCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                      {editingLocId != null ? 'Pick New Location' : 'Pick Location'}
+                    </button>
+                    <button
+                      onClick={cancelPicker}
+                      disabled={busy}
+                      className="text-[10px] text-gray-500 hover:text-gray-700 flex items-center gap-0.5 disabled:opacity-50"
+                    >
+                      <X size={11} /> Cancel
+                    </button>
+                  </div>
+
+                  {!pickerCollapsed && (
+                    <div className="space-y-2.5">
+                      <LocationLevelColumn label="Zone"  options={zones}   selectedId={zoneId}  onSelectId={id => { setZoneId(id);  setAisleId(''); setBayId(''); setShelfId('') }} busy={busy} />
+                      <LocationLevelColumn label="Aisle" options={aisles}  selectedId={aisleId} onSelectId={id => { setAisleId(id); setBayId(''); setShelfId('') }} busy={busy} />
+                      <LocationLevelColumn label="Bay"   options={bays}    selectedId={bayId}   onSelectId={id => { setBayId(id);   setShelfId('') }} busy={busy} />
+                      <LocationLevelColumn label="Row"   options={shelves} selectedId={shelfId} onSelectId={setShelfId} busy={busy} />
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleApply}
+                    disabled={busy || !canApply}
+                    className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {busy ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}
+                    {busy ? 'Saving…' : editingLocId != null ? 'Update Location' : 'Assign Location'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {msg && (
+            <p className={`text-xs font-medium flex items-center gap-1 ${msg.ok ? 'text-green-600' : 'text-red-600'}`}>
+              {msg.ok ? <CheckCircle size={12} /> : <AlertTriangle size={12} />} {msg.text}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <LocationManagerDialog
+        open={managerOpen}
+        onClose={() => { setManagerOpen(false); getLocations().then(all => setAllLocs(all.filter(l => l.active !== false))).catch(() => {}) }}
+        onCreated={(_loc: CreatedLocation) => { getLocations().then(all => setAllLocs(all.filter(l => l.active !== false))).catch(() => {}) }}
+      />
     </div>
   )
 }

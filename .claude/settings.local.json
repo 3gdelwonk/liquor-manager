@@ -55,7 +55,25 @@
       "WebFetch(domain:serper.dev)",
       "WebFetch(domain:freeapihub.com)",
       "WebFetch(domain:databar.ai)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f''''{i[\"\"title\"\"]}: {i[\"\"imageUrl\"\"][:80]}''''\\) for i in d.get\\(''''images'''',[]\\)]\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f''''{i[\"\"title\"\"]}: {i[\"\"imageUrl\"\"][:80]}''''\\) for i in d.get\\(''''images'''',[]\\)]\")",
+      "Bash(npm list:*)",
+      "Bash(find /c/Users/Admin/OneDrive/Desktop -name wrangler.toml -o -name cloudflare -o -name worker* -o -name *worker*)",
+      "Bash(xargs wc:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(npx -y json)",
+      "Bash(gh run:*)",
+      "Bash(cd /tmp)",
+      "Bash(unzip -o logs.zip -d gh_logs)",
+      "Bash(cat gh_logs/build/*.txt)",
+      "Bash(VITE_BASE_PATH=/liquor-manager/ VITE_JARVIS_URL=https://api.jarvismart196410.uk npm run build)",
+      "Bash(VITE_BASE_PATH=/liquor-manager/ npx vite build)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:api.jarvismart196410.uk)",
+      "Read(//tmp/**)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f'{k}: {repr\\(v\\)}'\\) for i in d['items'] for k,v in i.items\\(\\)]\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); inactive=[i for i in d.get\\('items',[]\\) if not i.get\\('IsActive'\\)]; print\\('inactive count:', len\\(inactive\\)\\); print\\('total:', d.get\\('count'\\)\\); print\\('first inactive:', inactive[0] if inactive else None\\)\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); items=data if isinstance\\(data,list\\) else data.get\\('items',[]\\); mr=[i for i in items if 'MR BLACK' in \\(i.get\\('ItemDescription',''\\) or ''\\).upper\\(\\)]; print\\(f'count={len\\(items\\)}, mr_black_count={len\\(mr\\)}'\\); [print\\(json.dumps\\(i,indent=2\\)\\) for i in mr]\")",
+      "Bash(powershell:*)"
     ]
   }
 }
