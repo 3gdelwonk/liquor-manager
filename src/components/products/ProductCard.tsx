@@ -237,7 +237,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     if (!showLocationPanel) return
     setLocLoading(true)
     getLocations()
-      .then(all => { if (mounted.current) setAllLocations(all.filter(l => l.active)) })
+      .then(all => { if (mounted.current) setAllLocations(all.filter(l => l.active !== false)) })
       .catch(() => { if (mounted.current) flashLocMsg('Failed to load locations') })
       .finally(() => { if (mounted.current) setLocLoading(false) })
   }, [showLocationPanel])
@@ -306,7 +306,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     try {
       const all = await getLocations()
       if (!mounted.current) return
-      const filtered = all.filter(l => l.active)
+      const filtered = all.filter(l => l.active !== false)
       setAllLocations(prev => {
         const serverIds = new Set(filtered.map(l => l.id))
         const localOnly = prev.filter(l => !serverIds.has(l.id))

@@ -73,7 +73,9 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     // Sync with server on close, merging with any optimistic adds
     try {
       const all = await getLocations()
-      const filtered = all.filter(l => l.active)
+      // Treat missing/undefined `active` as active — only hide explicit false.
+      // JARVISmart sometimes returns rows without the field set.
+      const filtered = all.filter(l => l.active !== false)
       setLocations(prev => {
         const serverIds = new Set(filtered.map(l => l.id))
         const localOnly = prev.filter(l => !serverIds.has(l.id))
@@ -135,7 +137,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
 
   useEffect(() => {
     getLocations()
-      .then(all => setLocations(all.filter(l => l.active)))
+      .then(all => setLocations(all.filter(l => l.active !== false)))
       .catch(() => setError('Failed to load locations'))
       .finally(() => setLocLoading(false))
   }, [])

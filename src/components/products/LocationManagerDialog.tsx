@@ -85,7 +85,9 @@ export default function LocationManagerDialog({
     setLoadingList(true)
     try {
       const all = await getLocations()
-      const filtered = all.filter(l => l.active)
+      // Treat missing/undefined `active` as active — only hide explicit false.
+      // Pre-existing DB rows often lack the field entirely.
+      const filtered = all.filter(l => l.active !== false)
       // Merge: preserve any locally-added entries the server GET didn't yet return
       // (guards against server-side caching of GET /api/pos/locations)
       setLocations(prev => {

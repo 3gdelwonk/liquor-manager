@@ -33,7 +33,7 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
           getLocations(),
           getItemLocations(item.itemCode),
         ])
-        setLocations(allLocs.filter(l => l.active))
+        setLocations(allLocs.filter(l => l.active !== false))
         setItemLocations(itemLocs)
       } catch (err) {
         setError((err as Error).message)
