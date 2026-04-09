@@ -2,13 +2,13 @@ import { useState, useEffect, useRef, memo, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
   Printer, Check, Loader2, Calendar, RefreshCw, Lock, Unlock,
-  Box, Truck, Trash2, Power, PowerOff,
+  Box, Truck, Trash2, Power, PowerOff, Pencil, X,
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
-import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
+import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, moveItemLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
-import { flattenLocations, buildLocationTree, formatItemLocation } from '../../lib/locationUtils'
+import { flattenLocations, buildLocationTree, parseLocationHierarchy } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
 import LocationManagerDialog, { type CreatedLocation } from './LocationManagerDialog'
 import ProductImage from '../ProductImage'
@@ -149,6 +149,10 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   const [createInitialType, setCreateInitialType] = useState<number>(4)
   const [createInitialParent, setCreateInitialParent] = useState<number | undefined>(undefined)
 
+  // When set, the assign panel is in "edit" mode — submitting will MOVE the item
+  // from the original location to the newly-picked one (rather than add a second).
+  const [editingLocationId, setEditingLocationId] = useState<number | null>(null)
+
   // Sync helpers — persist to module memory + cascade clear children
   function setZone(id: number | '') {
     _setZoneId(id)
@@ -255,22 +259,47 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }
     setLocBusy(true)
     try {
-      const assignRes = await assignItemLocation(finalId, item.itemCode)
+      // If editing, MOVE (so the original assignment is replaced, not duplicated)
+      const res = editingLocationId != null
+        ? await moveItemLocation(editingLocationId, item.itemCode, finalId)
+        : await assignItemLocation(finalId, item.itemCode)
       if (!mounted.current) return
-      if (assignRes.success) {
-        flashLocMsg('Location assigned')
+      if (res.success) {
+        flashLocMsg(editingLocationId != null ? 'Location updated' : 'Location assigned')
+        setEditingLocationId(null)
         const curr = await getItemLocations(item.itemCode)
         if (mounted.current) setItemLocations(curr)
       } else {
         // Surface raw server detail on phone (no F12)
-        const detail = assignRes.message || (assignRes.raw ? JSON.stringify(assignRes.raw) : 'no detail')
-        flashLocMsg(`Assign refused: ${detail}`)
+        const detail = res.message || (res.raw ? JSON.stringify(res.raw) : 'no detail')
+        flashLocMsg(`${editingLocationId != null ? 'Move' : 'Assign'} refused: ${detail}`)
       }
     } catch (err) {
       if (mounted.current) flashLocMsg((err as Error).message)
     } finally {
       if (mounted.current) setLocBusy(false)
     }
+  }
+
+  // Start editing an existing item-location: pre-fill cascade with its full hierarchy
+  function startEditLocation(loc: ItemLocation) {
+    const hierarchy = parseLocationHierarchy(loc.locationId, flatLocs)
+    _setZoneId(hierarchy[4]?.id ?? '')
+    _setAisleId(hierarchy[1]?.id ?? '')
+    _setBayId(hierarchy[2]?.id ?? '')
+    _setShelfId(hierarchy[3]?.id ?? '')
+    locationMemory.zoneId = hierarchy[4]?.id ?? ''
+    locationMemory.aisleId = hierarchy[1]?.id ?? ''
+    locationMemory.bayId = hierarchy[2]?.id ?? ''
+    locationMemory.shelfId = hierarchy[3]?.id ?? ''
+    setEditingLocationId(loc.locationId)
+  }
+
+  function cancelEditLocation() {
+    setEditingLocationId(null)
+    _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
+    locationMemory.zoneId = ''; locationMemory.aisleId = ''
+    locationMemory.bayId = ''; locationMemory.shelfId = ''
   }
 
   // Open create dialog with context-aware defaults:
@@ -764,36 +793,70 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                 </div>
               ) : (
                 <>
-                  {/* Current locations */}
+                  {/* Current locations — full 4-level breadcrumb for easy identification */}
                   {itemLocations.length > 0 && (
                     <div className="space-y-1.5">
                       <p className="text-[10px] font-semibold text-blue-500 uppercase">Current</p>
-                      {itemLocations.map(loc => (
-                        <div key={loc.locationId} className="flex items-center justify-between bg-white rounded-lg px-2.5 py-1.5">
-                          <div className="min-w-0">
-                            <span className="text-xs font-medium text-gray-700 block truncate">
-                              {formatItemLocation(loc)}
-                            </span>
-                            {loc.typeName && (
-                              <span className="text-[10px] text-gray-400">{loc.typeName}</span>
-                            )}
-                          </div>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleRemoveLocation(loc) }}
-                            disabled={locBusy}
-                            className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50 shrink-0"
+                      {itemLocations.map(loc => {
+                        const hierarchy = parseLocationHierarchy(loc.locationId, flatLocs)
+                        const isEditing = editingLocationId === loc.locationId
+                        return (
+                          <div
+                            key={loc.locationId}
+                            className={`bg-white rounded-lg px-2.5 py-2 ${isEditing ? 'ring-2 ring-blue-400' : ''}`}
                           >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      ))}
+                            <div className="grid grid-cols-4 gap-1.5 mb-1.5">
+                              {([4, 1, 2, 3] as const).map(typeId => {
+                                const node = hierarchy[typeId]
+                                const labels: Record<number, string> = { 4: 'Zone', 1: 'Aisle', 2: 'Bay', 3: 'Row' }
+                                return (
+                                  <div key={typeId} className="min-w-0">
+                                    <p className="text-[8px] font-semibold text-gray-400 uppercase">{labels[typeId]}</p>
+                                    <p className={`text-[11px] font-medium truncate ${node ? 'text-gray-800' : 'text-gray-300'}`}>
+                                      {node ? node.name : '—'}
+                                    </p>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            <div className="flex items-center justify-end gap-1">
+                              {isEditing ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); cancelEditLocation() }}
+                                  disabled={locBusy}
+                                  className="text-[10px] font-semibold text-gray-500 hover:text-gray-700 px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-50"
+                                >
+                                  <X size={11} /> Cancel edit
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); startEditLocation(loc) }}
+                                  disabled={locBusy}
+                                  className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-50"
+                                >
+                                  <Pencil size={11} /> Edit
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleRemoveLocation(loc) }}
+                                disabled={locBusy}
+                                className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
 
                   {/* Cascading location fields — all 4 levels always visible, gap-skipping allowed */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-semibold text-blue-500 uppercase">Assign Location</p>
+                      <p className="text-[10px] font-semibold text-blue-500 uppercase">
+                        {editingLocationId != null ? 'Update Location' : 'Assign Location'}
+                      </p>
                       <button
                         onClick={(e) => { e.stopPropagation(); openCreateDialog() }}
                         disabled={locBusy}
@@ -844,7 +907,9 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
                       {locBusy ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}
-                      {locBusy ? 'Assigning...' : 'Assign Location'}
+                      {locBusy
+                        ? (editingLocationId != null ? 'Updating...' : 'Assigning...')
+                        : (editingLocationId != null ? 'Update Location' : 'Assign Location')}
                     </button>
                   </div>
 
