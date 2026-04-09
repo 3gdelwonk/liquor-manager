@@ -13,7 +13,7 @@ export interface LevelOption {
 //   ''  → nothing picked (skipped on submit)
 //   >0  → existing location id
 //
-// New-location creation is handled by CreateLocationDialog, not inline here.
+// New-location creation is handled by LocationManagerDialog, not inline here.
 
 export function LocationLevelColumn({
   label,

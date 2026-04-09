@@ -292,31 +292,16 @@ export async function createLocation(
   const body: Record<string, unknown> = { name, shortCode, typeId }
   if (parentId) body.parentId = parentId
   try {
-    const res = await jarvisPost<{
-      ok?: boolean
-      success?: boolean
-      created?: boolean
-      id?: number
-      locationId?: number
-      insertId?: number
-      location?: { id?: number }
-      error?: string
-      message?: string
-    }>('/api/pos/locations', body)
-    // Log raw response so network failures are easier to diagnose
+    const res = await jarvisPost<Record<string, unknown>>('/api/pos/locations', body)
     console.log('[createLocation] POST /api/pos/locations →', res)
-    const id = res.id ?? res.locationId ?? res.insertId ?? res.location?.id
+    const id = extractId(res)
+    const err = extractErr(res)
     const success =
       res.ok === true ||
       res.success === true ||
       res.created === true ||
-      (id != null && res.error == null)
-    return {
-      success,
-      id,
-      message: res.message ?? res.error,
-      raw: res,
-    }
+      (id != null && err == null)
+    return { success, id, message: err ?? extractMsg(res), raw: res }
   } catch (err) {
     console.error('[createLocation] threw:', err)
     return { success: false, message: (err as Error).message }
@@ -326,8 +311,46 @@ export async function createLocation(
 export async function updateLocation(
   locationId: number,
   updates: { name?: string; shortCode?: string; typeId?: number; parentId?: number }
-): Promise<{ success: boolean; message?: string }> {
-  return jarvisPut(`/api/pos/locations/${locationId}`, updates)
+): Promise<{ success: boolean; message?: string; raw?: unknown }> {
+  try {
+    const res = await jarvisPut<Record<string, unknown>>(`/api/pos/locations/${locationId}`, updates)
+    console.log('[updateLocation] PUT →', res)
+    const err = extractErr(res)
+    const success =
+      res.ok === true ||
+      res.success === true ||
+      res.updated === true ||
+      err == null
+    return { success, message: err ?? extractMsg(res), raw: res }
+  } catch (err) {
+    console.error('[updateLocation] threw:', err)
+    return { success: false, message: (err as Error).message }
+  }
+}
+
+// Tolerant extractors: JARVISmart endpoints use inconsistent shapes
+function extractId(o: Record<string, unknown>): number | undefined {
+  const candidates = [
+    o.id,
+    o.locationId,
+    o.insertId,
+    (o.location as Record<string, unknown> | undefined)?.id,
+    (o.data as Record<string, unknown> | undefined)?.id,
+    (o.result as Record<string, unknown> | undefined)?.id,
+  ]
+  for (const c of candidates) {
+    if (typeof c === 'number' && c > 0) return c
+    if (typeof c === 'string' && /^\d+$/.test(c)) return Number(c)
+  }
+  return undefined
+}
+function extractErr(o: Record<string, unknown>): string | undefined {
+  const v = o.error ?? o.err
+  return typeof v === 'string' ? v : undefined
+}
+function extractMsg(o: Record<string, unknown>): string | undefined {
+  const v = o.message ?? o.msg
+  return typeof v === 'string' ? v : undefined
 }
 
 export async function deleteLocation(

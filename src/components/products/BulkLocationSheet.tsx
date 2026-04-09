@@ -5,7 +5,7 @@ import { getLocations } from '../../lib/jarvis'
 import { bulkAssignLocation } from '../../lib/jarvisActions'
 import { flattenLocations, buildLocationTree } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
-import CreateLocationDialog from './CreateLocationDialog'
+import LocationManagerDialog, { type CreatedLocation } from './LocationManagerDialog'
 import BarcodeScanner from '../BarcodeScanner'
 
 interface BulkLocationSheetProps {
@@ -55,16 +55,32 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     setCreateOpen(true)
   }
 
-  async function handleLocationCreated(newId: number, typeId: number) {
+  function handleLocationCreated(loc: CreatedLocation) {
+    // Optimistic add to cascade dropdown options (guards against server cache lag)
+    setLocations(prev => {
+      if (prev.some(l => l.id === loc.id)) return prev
+      return [...prev, { ...loc, active: true } as StockLocation]
+    })
+    // Pre-select in the cascade so the user doesn't have to manually pick it
+    if (loc.typeId === 4) setZoneId(loc.id)
+    else if (loc.typeId === 1) setAisleId(loc.id)
+    else if (loc.typeId === 2) setBayId(loc.id)
+    else if (loc.typeId === 3) setShelfId(loc.id)
+  }
+
+  async function handleManagerClose() {
+    setCreateOpen(false)
+    // Sync with server on close, merging with any optimistic adds
     try {
-      const updated = await getLocations()
-      setLocations(updated.filter(l => l.active))
-      if (typeId === 4) setZoneId(newId)
-      else if (typeId === 1) setAisleId(newId)
-      else if (typeId === 2) setBayId(newId)
-      else if (typeId === 3) setShelfId(newId)
+      const all = await getLocations()
+      const filtered = all.filter(l => l.active)
+      setLocations(prev => {
+        const serverIds = new Set(filtered.map(l => l.id))
+        const localOnly = prev.filter(l => !serverIds.has(l.id))
+        return [...filtered, ...localOnly]
+      })
     } catch {
-      // noop
+      // Optimistic state remains valid
     }
   }
 
@@ -199,7 +215,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                   disabled={processing}
                   className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50"
                 >
-                  + Create
+                  Manage
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-1.5">
@@ -341,11 +357,10 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
 
       <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
 
-      <CreateLocationDialog
+      <LocationManagerDialog
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={handleManagerClose}
         onCreated={handleLocationCreated}
-        allLocations={locations}
         initialTypeId={createInitialType}
         initialParentId={createInitialParent}
       />

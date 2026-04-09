@@ -10,7 +10,7 @@ import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, remo
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, formatItemLocation } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
-import CreateLocationDialog from './CreateLocationDialog'
+import LocationManagerDialog, { type CreatedLocation } from './LocationManagerDialog'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 
@@ -282,20 +282,34 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     setCreateOpen(true)
   }
 
-  async function handleLocationCreated(newId: number, typeId: number) {
-    // Reload full location list so dropdowns pick up the new entry
+  function handleLocationCreated(loc: CreatedLocation) {
+    // Optimistic: add to dropdown options immediately (guards against server cache lag)
+    setAllLocations(prev => {
+      if (prev.some(l => l.id === loc.id)) return prev
+      return [...prev, { ...loc, active: true } as StockLocation]
+    })
+    // Auto-select at its level so the user doesn't have to reopen the dropdown
+    if (loc.typeId === 4) setZone(loc.id)
+    else if (loc.typeId === 1) { _setAisleId(loc.id); locationMemory.aisleId = loc.id }
+    else if (loc.typeId === 2) { _setBayId(loc.id); locationMemory.bayId = loc.id }
+    else if (loc.typeId === 3) { _setShelfId(loc.id); locationMemory.shelfId = loc.id }
+    flashLocMsg(`Created ${loc.name}`)
+  }
+
+  async function handleManagerClose() {
+    setCreateOpen(false)
+    // Sync with server on close, merging with any optimistic adds
     try {
       const all = await getLocations()
       if (!mounted.current) return
-      setAllLocations(all.filter(l => l.active))
-      // Auto-select the new location at its level
-      if (typeId === 4) setZone(newId)
-      else if (typeId === 1) _setAisleId(newId), (locationMemory.aisleId = newId)
-      else if (typeId === 2) _setBayId(newId), (locationMemory.bayId = newId)
-      else if (typeId === 3) _setShelfId(newId), (locationMemory.shelfId = newId)
-      flashLocMsg('Location created')
+      const filtered = all.filter(l => l.active)
+      setAllLocations(prev => {
+        const serverIds = new Set(filtered.map(l => l.id))
+        const localOnly = prev.filter(l => !serverIds.has(l.id))
+        return [...filtered, ...localOnly]
+      })
     } catch {
-      flashLocMsg('Created — refresh to see it')
+      // Optimistic state remains valid
     }
   }
 
@@ -781,7 +795,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                         disabled={locBusy}
                         className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50 flex items-center gap-0.5"
                       >
-                        + Create
+                        Manage
                       </button>
                     </div>
                     <div className="grid grid-cols-4 gap-1.5">
@@ -830,11 +844,10 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     </button>
                   </div>
 
-                  <CreateLocationDialog
+                  <LocationManagerDialog
                     open={createOpen}
-                    onClose={() => setCreateOpen(false)}
+                    onClose={handleManagerClose}
                     onCreated={handleLocationCreated}
-                    allLocations={allLocations}
                     initialTypeId={createInitialType}
                     initialParentId={createInitialParent}
                   />
