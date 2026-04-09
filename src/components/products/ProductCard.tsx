@@ -326,12 +326,20 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   // Start editing an existing item-location: clear the cascade so the user
   // must explicitly pick a NEW location. The original assignment stays in
   // place server-side until they fill the cascade and tap "Update Location",
-  // at which point moveItemLocation replaces it.
+  // at which point remove+assign replaces it.
   function startEditLocation(loc: ItemLocation) {
     _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
     locationMemory.zoneId = ''; locationMemory.aisleId = ''
     locationMemory.bayId = ''; locationMemory.shelfId = ''
-    setEditingLocationId(loc.locationId)
+    // Tolerant id extraction — server may return `id` instead of `locationId`
+    const o = loc as unknown as Record<string, unknown>
+    const candidates = [o.locationId, o.id, o.locationID, o.location_id]
+    let id: number | null = null
+    for (const c of candidates) {
+      if (typeof c === 'number') { id = c; break }
+      if (typeof c === 'string' && /^\d+$/.test(c)) { id = Number(c); break }
+    }
+    setEditingLocationId(id)
   }
 
   function cancelEditLocation() {
@@ -922,10 +930,10 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
                   {/* Cascade picker — only visible when adding new or changing existing */}
                   {(addingNew || editingLocationId != null) && (
-                    <div className="space-y-2 bg-white rounded-lg p-2.5 ring-2 ring-blue-300">
+                    <div className="space-y-2 bg-white rounded-lg p-3 ring-2 ring-blue-400 shadow-md">
                       <div className="flex items-center justify-between">
-                        <p className="text-[10px] font-semibold text-blue-700 uppercase">
-                          {editingLocationId != null ? 'Pick New Location' : 'Pick Location'}
+                        <p className="text-xs font-bold text-blue-700 uppercase">
+                          {editingLocationId != null ? '↓ Pick New Location ↓' : '↓ Pick Location ↓'}
                         </p>
                         <button
                           onClick={(e) => { e.stopPropagation(); cancelEditLocation() }}
@@ -935,6 +943,13 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                           <X size={11} /> Cancel
                         </button>
                       </div>
+
+                      {/* Option-count debug strip — confirms dropdowns have data */}
+                      <p className="text-[9px] text-gray-500 font-mono">
+                        Z:{zones.length} A:{aisles.length} B:{bays.length} R:{shelves.length}
+                        {flatLocs.length === 0 && ' ⚠ no locations loaded'}
+                      </p>
+
                       <div className="grid grid-cols-4 gap-1.5">
                         <LocationLevelColumn
                           label="Zone"

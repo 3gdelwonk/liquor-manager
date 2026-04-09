@@ -28,9 +28,10 @@ export function LocationLevelColumn({
   onSelectId: (id: number | '') => void
   busy: boolean
 }) {
+  const isEmpty = options.length === 0
   return (
     <div className="space-y-1 min-w-0">
-      <label className="text-[9px] font-semibold text-blue-400 uppercase block truncate">{label}</label>
+      <label className="text-[10px] font-semibold text-blue-500 uppercase block truncate">{label}</label>
       <select
         value={selectedId === '' ? '' : String(selectedId)}
         onChange={e => {
@@ -38,10 +39,12 @@ export function LocationLevelColumn({
           onSelectId(v)
         }}
         onClick={e => e.stopPropagation()}
-        disabled={busy}
-        className="w-full border border-blue-200 rounded-lg px-1.5 py-1.5 text-[11px] bg-white focus:ring-2 focus:ring-blue-300 disabled:opacity-50 truncate"
+        disabled={busy || isEmpty}
+        className={`w-full border-2 rounded-lg px-2 py-2 text-xs bg-white focus:ring-2 focus:ring-blue-400 disabled:opacity-50 truncate ${
+          selectedId !== '' ? 'border-blue-500 font-semibold text-blue-700' : 'border-blue-200 text-gray-700'
+        }`}
       >
-        <option value="">—</option>
+        <option value="">{isEmpty ? '(none)' : '—'}</option>
         {options.map(o => (
           <option key={o.id} value={o.id}>{o.shortCode || o.name}</option>
         ))}
