@@ -8,7 +8,7 @@ import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, Ite
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
 import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, moveItemLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
-import { flattenLocations, buildLocationTree, parseLocationHierarchy } from '../../lib/locationUtils'
+import { flattenLocations, buildLocationTree, buildItemBreadcrumb } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
 import LocationManagerDialog, { type CreatedLocation } from './LocationManagerDialog'
 import ProductImage from '../ProductImage'
@@ -813,7 +813,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     <div className="space-y-1.5">
                       <p className="text-[10px] font-semibold text-blue-500 uppercase">Current</p>
                       {itemLocations.map(loc => {
-                        const hierarchy = parseLocationHierarchy(loc.locationId, flatLocs)
+                        const breadcrumb = buildItemBreadcrumb(loc, flatLocs)
                         const isEditing = editingLocationId === loc.locationId
                         return (
                           <div
@@ -822,13 +822,13 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                           >
                             <div className="grid grid-cols-4 gap-1.5 mb-1.5">
                               {([4, 1, 2, 3] as const).map(typeId => {
-                                const node = hierarchy[typeId]
+                                const cell = breadcrumb[typeId]
                                 const labels: Record<number, string> = { 4: 'Zone', 1: 'Aisle', 2: 'Bay', 3: 'Row' }
                                 return (
                                   <div key={typeId} className="min-w-0">
                                     <p className="text-[8px] font-semibold text-gray-400 uppercase">{labels[typeId]}</p>
-                                    <p className={`text-[11px] font-medium truncate ${node ? 'text-gray-800' : 'text-gray-300'}`}>
-                                      {node ? node.name : '—'}
+                                    <p className={`text-[11px] font-medium truncate ${cell.name ? 'text-gray-800' : 'text-gray-300'}`}>
+                                      {cell.name ?? '—'}
                                     </p>
                                   </div>
                                 )
@@ -940,6 +940,18 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     <p className={`text-[11px] font-medium ${locMsg.includes('Failed') || locMsg.includes('fail') ? 'text-red-600' : 'text-green-600'}`}>
                       {locMsg}
                     </p>
+                  )}
+
+                  {/* Raw debug: shows what /api/pos/locations/item/:code returns */}
+                  {itemLocations.length > 0 && (
+                    <details className="mt-1">
+                      <summary className="text-[9px] uppercase font-semibold text-gray-400 cursor-pointer select-none">
+                        Raw item-location JSON ({itemLocations.length})
+                      </summary>
+                      <pre className="text-[9px] font-mono bg-gray-50 border border-gray-200 rounded p-2 mt-1 overflow-auto max-h-40 break-all whitespace-pre-wrap">
+                        {JSON.stringify(itemLocations, null, 2)}
+                      </pre>
+                    </details>
                   )}
                 </>
               )}
