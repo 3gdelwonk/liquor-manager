@@ -28,10 +28,28 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     const scanner = new Html5Qrcode('barcode-reader')
     scannerRef.current = scanner
 
+    // videoConstraints: request high-res back camera and try to reset
+    // digital zoom to 1× (advanced constraint is silently ignored on cameras
+    // that don't expose the zoom API, so it's always safe to include).
+    const videoConstraints: MediaTrackConstraints = {
+      facingMode: { ideal: 'environment' },
+      width:  { ideal: 1920 },
+      height: { ideal: 1080 },
+      advanced: [{ zoom: 1 } as MediaTrackConstraintSet],
+    }
+
+    // qrbox: use 85% of the shorter viewfinder dimension so the scan area
+    // is as wide as possible. When a camera is zoomed in the barcode appears
+    // large in-frame; a small fixed box would miss it entirely.
+    const qrboxFn = (viewW: number, viewH: number) => {
+      const side = Math.round(Math.min(viewW, viewH) * 0.85)
+      return { width: Math.min(side, viewW - 4), height: Math.round(side * 0.55) }
+    }
+
     scanner
       .start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 180 } },
+        videoConstraints,
+        { fps: 15, qrbox: qrboxFn, aspectRatio: 1.777 },
         (decodedText) => {
           if (!activeRef.current) return
           activeRef.current = false
@@ -125,7 +143,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         </div>
       ) : (
         <div className="text-center pb-6 space-y-1">
-          <p className="text-xs text-white/50">Align barcode within the frame</p>
+          <p className="text-xs text-white/50">Align barcode within the frame — step back if image looks too zoomed</p>
           <p className="text-[10px] text-white/30">EAN-13 · UPC · EAN-8 · Code 128</p>
         </div>
       )}
