@@ -152,6 +152,9 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   // When set, the assign panel is in "edit" mode — submitting will MOVE the item
   // from the original location to the newly-picked one (rather than add a second).
   const [editingLocationId, setEditingLocationId] = useState<number | null>(null)
+  // True when the user clicked "Add Location" to begin a fresh assignment.
+  // The cascade picker is only visible when one of these flags is active.
+  const [addingNew, setAddingNew] = useState(false)
 
   // Sync helpers — persist to module memory + cascade clear children
   function setZone(id: number | '') {
@@ -280,6 +283,11 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
       if (res.success) {
         flashLocMsg(editingLocationId != null ? 'Location updated' : 'Location assigned')
         setEditingLocationId(null)
+        setAddingNew(false)
+        // Clear cascade so the next open starts fresh
+        _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
+        locationMemory.zoneId = ''; locationMemory.aisleId = ''
+        locationMemory.bayId = ''; locationMemory.shelfId = ''
         const curr = await getItemLocations(item.itemCode)
         if (mounted.current) setItemLocations(curr)
       } else {
@@ -307,6 +315,15 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
 
   function cancelEditLocation() {
     setEditingLocationId(null)
+    setAddingNew(false)
+    _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
+    locationMemory.zoneId = ''; locationMemory.aisleId = ''
+    locationMemory.bayId = ''; locationMemory.shelfId = ''
+  }
+
+  function startAddNewLocation() {
+    setEditingLocationId(null)
+    setAddingNew(true)
     _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
     locationMemory.zoneId = ''; locationMemory.aisleId = ''
     locationMemory.bayId = ''; locationMemory.shelfId = ''
@@ -808,10 +825,23 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                 </div>
               ) : (
                 <>
+                  {/* Header row with Manage link (always accessible) */}
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold text-blue-500 uppercase">
+                      {itemLocations.length > 0 ? 'Current' : 'No Location Assigned'}
+                    </p>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openCreateDialog() }}
+                      disabled={locBusy}
+                      className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                    >
+                      Manage
+                    </button>
+                  </div>
+
                   {/* Current locations — full 4-level breadcrumb for easy identification */}
                   {itemLocations.length > 0 && (
                     <div className="space-y-1.5">
-                      <p className="text-[10px] font-semibold text-blue-500 uppercase">Current</p>
                       {itemLocations.map(loc => {
                         const breadcrumb = buildItemBreadcrumb(loc, flatLocs)
                         const isEditing = editingLocationId === loc.locationId
@@ -835,23 +865,13 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                               })}
                             </div>
                             <div className="flex items-center justify-end gap-1">
-                              {isEditing ? (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); cancelEditLocation() }}
-                                  disabled={locBusy}
-                                  className="text-[10px] font-semibold text-gray-500 hover:text-gray-700 px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-50"
-                                >
-                                  <X size={11} /> Cancel edit
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); startEditLocation(loc) }}
-                                  disabled={locBusy}
-                                  className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-50"
-                                >
-                                  <Pencil size={11} /> Edit
-                                </button>
-                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); startEditLocation(loc) }}
+                                disabled={locBusy || isEditing}
+                                className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-50"
+                              >
+                                <Pencil size={11} /> Change Location
+                              </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleRemoveLocation(loc) }}
                                 disabled={locBusy}
@@ -866,67 +886,80 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     </div>
                   )}
 
-                  {/* Cascading location fields — all 4 levels always visible, gap-skipping allowed */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-semibold text-blue-500 uppercase">
-                        {editingLocationId != null ? 'Update Location' : 'Assign Location'}
-                      </p>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); openCreateDialog() }}
-                        disabled={locBusy}
-                        className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50 flex items-center gap-0.5"
-                      >
-                        Manage
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      <LocationLevelColumn
-                        label="Zone"
-                        options={zones}
-                        selectedId={zoneId}
-                        onSelectId={setZone}
-                        busy={locBusy}
-                      />
-                      <LocationLevelColumn
-                        label="Aisle"
-                        options={aisles}
-                        selectedId={aisleId}
-                        onSelectId={setAisle}
-                        busy={locBusy}
-                      />
-                      <LocationLevelColumn
-                        label="Bay"
-                        options={bays}
-                        selectedId={bayId}
-                        onSelectId={setBay}
-                        busy={locBusy}
-                      />
-                      <LocationLevelColumn
-                        label="Row"
-                        options={shelves}
-                        selectedId={shelfId}
-                        onSelectId={setShelf}
-                        busy={locBusy}
-                      />
-                    </div>
-
+                  {/* Add Location button — only when nothing is being added/edited */}
+                  {!addingNew && editingLocationId == null && itemLocations.length === 0 && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleAssignHierarchy() }}
-                      disabled={locBusy || !hasAnyCascadeInput([
-                        { id: zoneId, typeId: 4 },
-                        { id: aisleId, typeId: 1 },
-                        { id: bayId, typeId: 2 },
-                        { id: shelfId, typeId: 3 },
-                      ])}
+                      onClick={(e) => { e.stopPropagation(); startAddNewLocation() }}
+                      disabled={locBusy}
                       className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
-                      {locBusy ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}
-                      {locBusy
-                        ? (editingLocationId != null ? 'Updating...' : 'Assigning...')
-                        : (editingLocationId != null ? 'Update Location' : 'Assign Location')}
+                      <MapPin size={12} /> Add Location
                     </button>
-                  </div>
+                  )}
+
+                  {/* Cascade picker — only visible when adding new or changing existing */}
+                  {(addingNew || editingLocationId != null) && (
+                    <div className="space-y-2 bg-white rounded-lg p-2.5 ring-2 ring-blue-300">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-semibold text-blue-700 uppercase">
+                          {editingLocationId != null ? 'Pick New Location' : 'Pick Location'}
+                        </p>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); cancelEditLocation() }}
+                          disabled={locBusy}
+                          className="text-[10px] font-semibold text-gray-500 hover:text-gray-700 px-1 flex items-center gap-0.5 disabled:opacity-50"
+                        >
+                          <X size={11} /> Cancel
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <LocationLevelColumn
+                          label="Zone"
+                          options={zones}
+                          selectedId={zoneId}
+                          onSelectId={setZone}
+                          busy={locBusy}
+                        />
+                        <LocationLevelColumn
+                          label="Aisle"
+                          options={aisles}
+                          selectedId={aisleId}
+                          onSelectId={setAisle}
+                          busy={locBusy}
+                        />
+                        <LocationLevelColumn
+                          label="Bay"
+                          options={bays}
+                          selectedId={bayId}
+                          onSelectId={setBay}
+                          busy={locBusy}
+                        />
+                        <LocationLevelColumn
+                          label="Row"
+                          options={shelves}
+                          selectedId={shelfId}
+                          onSelectId={setShelf}
+                          busy={locBusy}
+                        />
+                      </div>
+
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleAssignHierarchy() }}
+                        disabled={locBusy || !hasAnyCascadeInput([
+                          { id: zoneId, typeId: 4 },
+                          { id: aisleId, typeId: 1 },
+                          { id: bayId, typeId: 2 },
+                          { id: shelfId, typeId: 3 },
+                        ])}
+                        className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      >
+                        {locBusy ? <Loader2 size={12} className="animate-spin" /> : <MapPin size={12} />}
+                        {locBusy
+                          ? (editingLocationId != null ? 'Updating...' : 'Assigning...')
+                          : (editingLocationId != null ? 'Update Location' : 'Assign Location')}
+                      </button>
+                    </div>
+                  )}
 
                   <LocationManagerDialog
                     open={createOpen}
