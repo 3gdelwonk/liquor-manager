@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
 import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
-import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, moveItemLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
+import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, buildItemBreadcrumb } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
@@ -275,26 +275,47 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }
     setLocBusy(true)
     try {
-      // If editing, MOVE (so the original assignment is replaced, not duplicated)
-      const res = editingLocationId != null
-        ? await moveItemLocation(editingLocationId, item.itemCode, finalId)
-        : await assignItemLocation(finalId, item.itemCode)
-      if (!mounted.current) return
-      if (res.success) {
-        flashLocMsg(editingLocationId != null ? 'Location updated' : 'Location assigned')
-        setEditingLocationId(null)
-        setAddingNew(false)
-        // Clear cascade so the next open starts fresh
-        _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
-        locationMemory.zoneId = ''; locationMemory.aisleId = ''
-        locationMemory.bayId = ''; locationMemory.shelfId = ''
-        const curr = await getItemLocations(item.itemCode)
-        if (mounted.current) setItemLocations(curr)
+      // CHANGE LOCATION = explicit remove old + assign new (two-step).
+      // Avoids the move endpoint which can be ambiguous and only touches
+      // the item↔location assignment row, never the location tree itself.
+      if (editingLocationId != null) {
+        const removeRes = await removeItemLocation(editingLocationId, item.itemCode)
+        if (!mounted.current) return
+        if (!removeRes.success) {
+          const detail = removeRes.message || (removeRes.raw ? JSON.stringify(removeRes.raw) : 'no detail')
+          flashLocMsg(`Remove refused: ${detail}`)
+          return
+        }
+        const assignRes = await assignItemLocation(finalId, item.itemCode)
+        if (!mounted.current) return
+        if (!assignRes.success) {
+          const detail = assignRes.message || (assignRes.raw ? JSON.stringify(assignRes.raw) : 'no detail')
+          // Old assignment is already gone — surface that clearly so user can retry
+          flashLocMsg(`Removed old, but new assign refused: ${detail}`)
+          const curr = await getItemLocations(item.itemCode)
+          if (mounted.current) setItemLocations(curr)
+          return
+        }
+        flashLocMsg('Location updated')
       } else {
-        // Surface raw server detail on phone (no F12)
-        const detail = res.message || (res.raw ? JSON.stringify(res.raw) : 'no detail')
-        flashLocMsg(`${editingLocationId != null ? 'Move' : 'Assign'} refused: ${detail}`)
+        const assignRes = await assignItemLocation(finalId, item.itemCode)
+        if (!mounted.current) return
+        if (!assignRes.success) {
+          const detail = assignRes.message || (assignRes.raw ? JSON.stringify(assignRes.raw) : 'no detail')
+          flashLocMsg(`Assign refused: ${detail}`)
+          return
+        }
+        flashLocMsg('Location assigned')
       }
+
+      setEditingLocationId(null)
+      setAddingNew(false)
+      // Clear cascade so the next open starts fresh
+      _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
+      locationMemory.zoneId = ''; locationMemory.aisleId = ''
+      locationMemory.bayId = ''; locationMemory.shelfId = ''
+      const curr = await getItemLocations(item.itemCode)
+      if (mounted.current) setItemLocations(curr)
     } catch (err) {
       if (mounted.current) flashLocMsg((err as Error).message)
     } finally {
@@ -854,11 +875,13 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                               {([4, 1, 2, 3] as const).map(typeId => {
                                 const cell = breadcrumb[typeId]
                                 const labels: Record<number, string> = { 4: 'Zone', 1: 'Aisle', 2: 'Bay', 3: 'Row' }
+                                // Prefer shortCode, fall back to name if missing
+                                const display = cell.shortCode ?? cell.name
                                 return (
                                   <div key={typeId} className="min-w-0">
                                     <p className="text-[8px] font-semibold text-gray-400 uppercase">{labels[typeId]}</p>
-                                    <p className={`text-[11px] font-medium truncate ${cell.name ? 'text-gray-800' : 'text-gray-300'}`}>
-                                      {cell.name ?? '—'}
+                                    <p className={`text-[11px] font-medium truncate ${display ? 'text-gray-800' : 'text-gray-300'}`}>
+                                      {display ?? '—'}
                                     </p>
                                   </div>
                                 )
