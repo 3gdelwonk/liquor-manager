@@ -157,37 +157,54 @@ export function buildItemBreadcrumb(
   const seedName = pickString(o, NAME_KEYS)
   const seedCode = pickString(o, CODE_KEYS)
   const seedId = pickNumber(o, ID_KEYS)
-  const seedParentId = pickNumber(o, PARENT_KEYS)
   const seedPath = pickString(o, PATH_KEYS)
 
-  // Seed from the ItemLocation itself (whatever its own typeId is)
-  if (seedTypeId === 1 || seedTypeId === 2 || seedTypeId === 3 || seedTypeId === 4) {
-    result[seedTypeId as LevelKey] = {
-      id: seedId,
-      name: seedName,
-      shortCode: seedCode,
-    }
+  const byId = new Map(flat.map(l => [l.id, l]))
+
+  // The /locations/item/:code endpoint only returns the leaf — no parentId,
+  // no ancestor info. To build the full breadcrumb we need to look the leaf
+  // up in `flat` (which has the full tree from /api/pos/locations) and walk
+  // its parent chain from there.
+  let walkFrom: FlatLocation | null = null
+
+  if (seedId != null) {
+    walkFrom = byId.get(seedId) ?? null
   }
 
-  // Walk up via parentId, looking up each ancestor in the flat list (also tolerant)
-  const byId = new Map(flat.map(l => [l.id, l]))
-  let parentId: number | null = seedParentId
-  let hops = 0
-  while (parentId != null && hops < 10) {
-    const parent = byId.get(parentId)
-    if (!parent) break
-    const po = parent as unknown as Record<string, unknown>
-    const pType = pickNumber(po, TYPE_KEYS)
-    if (pType === 1 || pType === 2 || pType === 3 || pType === 4) {
-      result[pType as LevelKey] = {
-        id: parent.id,
-        name: parent.name,
-        shortCode: parent.shortCode,
+  if (walkFrom) {
+    // Found in tree — seed from the tree entry (authoritative)
+    if (walkFrom.typeId === 1 || walkFrom.typeId === 2 || walkFrom.typeId === 3 || walkFrom.typeId === 4) {
+      result[walkFrom.typeId as LevelKey] = {
+        id: walkFrom.id,
+        name: walkFrom.name,
+        shortCode: walkFrom.shortCode,
       }
     }
-    const nextParent = pickNumber(po, PARENT_KEYS)
-    parentId = nextParent
-    hops++
+    // Walk ancestors
+    let parentId: number | null = walkFrom.parentId
+    let hops = 0
+    while (parentId != null && hops < 10) {
+      const parent = byId.get(parentId)
+      if (!parent) break
+      if (parent.typeId === 1 || parent.typeId === 2 || parent.typeId === 3 || parent.typeId === 4) {
+        result[parent.typeId as LevelKey] = {
+          id: parent.id,
+          name: parent.name,
+          shortCode: parent.shortCode,
+        }
+      }
+      parentId = parent.parentId
+      hops++
+    }
+  } else {
+    // Leaf not in tree — seed from ItemLocation directly (degraded mode)
+    if (seedTypeId === 1 || seedTypeId === 2 || seedTypeId === 3 || seedTypeId === 4) {
+      result[seedTypeId as LevelKey] = {
+        id: seedId,
+        name: seedName,
+        shortCode: seedCode,
+      }
+    }
   }
 
   // Fallback: split server `path` positionally if nothing populated
