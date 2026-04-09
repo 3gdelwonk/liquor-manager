@@ -236,15 +236,28 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     return bayId ? all.filter(l => l.parentId === bayId) : all
   }, [flatLocs, bayId])
 
-  // Load all locations when panel opens
+  // Load all locations AND refetch this item's current assignments whenever
+  // the panel is opened — assignments may have changed via Bulk or another card
   useEffect(() => {
     if (!showLocationPanel) return
     setLocLoading(true)
-    getLocations()
-      .then(all => { if (mounted.current) setAllLocations(all.filter(l => l.active !== false)) })
-      .catch(() => { if (mounted.current) flashLocMsg('Failed to load locations') })
-      .finally(() => { if (mounted.current) setLocLoading(false) })
-  }, [showLocationPanel])
+    Promise.allSettled([
+      getLocations(),
+      getItemLocations(item.itemCode),
+    ]).then(([locsRes, itemLocsRes]) => {
+      if (!mounted.current) return
+      if (locsRes.status === 'fulfilled') {
+        setAllLocations(locsRes.value.filter(l => l.active !== false))
+      } else {
+        flashLocMsg(`Failed to load locations: ${(locsRes.reason as Error)?.message ?? 'unknown'}`)
+      }
+      if (itemLocsRes.status === 'fulfilled') {
+        setItemLocations(itemLocsRes.value ?? [])
+      } else {
+        flashLocMsg(`Failed to load item locations: ${(itemLocsRes.reason as Error)?.message ?? 'unknown'}`)
+      }
+    }).finally(() => { if (mounted.current) setLocLoading(false) })
+  }, [showLocationPanel, item.itemCode])
 
   async function handleAssignHierarchy() {
     const finalId = resolveTargetLocation([
@@ -281,17 +294,14 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     }
   }
 
-  // Start editing an existing item-location: pre-fill cascade with its full hierarchy
+  // Start editing an existing item-location: clear the cascade so the user
+  // must explicitly pick a NEW location. The original assignment stays in
+  // place server-side until they fill the cascade and tap "Update Location",
+  // at which point moveItemLocation replaces it.
   function startEditLocation(loc: ItemLocation) {
-    const hierarchy = parseLocationHierarchy(loc.locationId, flatLocs)
-    _setZoneId(hierarchy[4]?.id ?? '')
-    _setAisleId(hierarchy[1]?.id ?? '')
-    _setBayId(hierarchy[2]?.id ?? '')
-    _setShelfId(hierarchy[3]?.id ?? '')
-    locationMemory.zoneId = hierarchy[4]?.id ?? ''
-    locationMemory.aisleId = hierarchy[1]?.id ?? ''
-    locationMemory.bayId = hierarchy[2]?.id ?? ''
-    locationMemory.shelfId = hierarchy[3]?.id ?? ''
+    _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
+    locationMemory.zoneId = ''; locationMemory.aisleId = ''
+    locationMemory.bayId = ''; locationMemory.shelfId = ''
     setEditingLocationId(loc.locationId)
   }
 
@@ -763,15 +773,20 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
               <span className="text-[11px] font-semibold">Promo</span>
             </button>
 
-            {/* Location (blue) — toggles inline panel */}
+            {/* Location (blue) — toggles inline panel; badge shows assignment count */}
             <button
               onClick={(e) => { e.stopPropagation(); setShowLocationPanel(p => !p) }}
-              className={`flex items-center justify-center gap-1 py-2.5 rounded-lg transition-colors ${
+              className={`relative flex items-center justify-center gap-1 py-2.5 rounded-lg transition-colors ${
                 showLocationPanel ? 'bg-blue-200 text-blue-800' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
               }`}
             >
               <MapPin size={14} />
-              <span className="text-[11px] font-semibold">Location</span>
+              <span className="text-[11px] font-semibold">
+                {itemLocations.length > 0 ? `Located (${itemLocations.length})` : 'Location'}
+              </span>
+              {itemLocations.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-500 border border-white" />
+              )}
             </button>
 
             {/* Print (gray) */}
