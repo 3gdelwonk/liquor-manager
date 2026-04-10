@@ -366,6 +366,18 @@ export default function LiveSalesView() {
         {liveTab === 'sales' && (
           <div className="p-4 space-y-4 pb-8">
 
+            {/* No-data empty state — data fetched but no liquor sales yet */}
+            {!loading && deptBreakdown !== null && liquorDepts.length === 0 && (
+              <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+                <p className="text-sm font-medium text-gray-500">No liquor sales recorded yet</p>
+                <p className="text-xs text-gray-400">
+                  {timeMode === 'day'
+                    ? 'Sales for today will appear once the POS syncs.'
+                    : `No sales data available for this ${timeMode}.`}
+                </p>
+              </div>
+            )}
+
             {/* Hero KPIs */}
             {liquorKPI && (
               <div className="space-y-3">
