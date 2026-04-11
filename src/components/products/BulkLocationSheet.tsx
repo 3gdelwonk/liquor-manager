@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Search, X, Loader2, CheckCircle, AlertTriangle, MapPin, ScanBarcode } from 'lucide-react'
 import type { StockItem, StockLocation, ItemLocation } from '../../lib/jarvis'
-import { getLocations, getItemLocations } from '../../lib/jarvis'
+import { getLocations, getItemLocations, searchItems } from '../../lib/jarvis'
 import { bulkAssignLocation } from '../../lib/jarvisActions'
 import { flattenLocations, buildLocationTree } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
@@ -91,6 +91,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   const [error, setError] = useState<string | null>(null)
 
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [scanFinding, setScanFinding] = useState(false)
   const [itemLocMap, setItemLocMap] = useState<Map<string, ItemLocation[]>>(new Map())
   const [locFetchingSet, setLocFetchingSet] = useState<Set<string>>(new Set())
   const [perItemResult, setPerItemResult] = useState<Map<string, 'new' | 'already' | 'failed'>>(new Map())
@@ -158,14 +159,39 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     }
   }, [])
 
-  const handleScan = useCallback((code: string) => {
+  const handleScan = useCallback(async (code: string) => {
     setScannerOpen(false)
-    const item = barcodeMap.get(code)
-    if (item && !addedCodes.has(item.itemCode)) {
-      setEntries(prev => [...prev, item])
-      fetchLocForItem(item.itemCode)
-    } else if (!item) {
+    // 1. Try the local cache first (instant)
+    const local = barcodeMap.get(code)
+    if (local) {
+      if (!addedCodes.has(local.itemCode)) {
+        setEntries(prev => [...prev, local])
+        fetchLocForItem(local.itemCode)
+      }
+      return
+    }
+    // 2. Not in local cache (item may be inactive, non-liquor, or barcode format
+    //    differs from what getStockLevels returned) — fall back to server search.
+    setScanFinding(true)
+    try {
+      const res = await searchItems(code, 10, true)
+      // Prefer an item whose barcode exactly matches the scanned code; if only
+      // one result comes back treat it as the match regardless.
+      const found =
+        res.items.find(i => i.barcode === code) ??
+        (res.items.length === 1 ? res.items[0] : null)
+      if (found && !addedCodes.has(found.itemCode)) {
+        setEntries(prev => [...prev, found])
+        fetchLocForItem(found.itemCode)
+      } else {
+        // No server match — surface the code in the search box so the user can
+        // pick manually or see the "nothing found" state.
+        setSearch(code)
+      }
+    } catch {
       setSearch(code)
+    } finally {
+      setScanFinding(false)
     }
   }, [barcodeMap, addedCodes, fetchLocForItem])
 
@@ -342,6 +368,11 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
               <ScanBarcode size={18} />
             </button>
           </div>
+          {scanFinding && (
+            <p className="mt-1.5 text-xs text-gray-400 flex items-center gap-1.5 px-1">
+              <Loader2 size={11} className="animate-spin" /> Looking up barcode on server...
+            </p>
+          )}
           {searchResults.length > 0 && (
             <div className="mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-36 overflow-auto">
               {searchResults.map(item => (
