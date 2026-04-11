@@ -80,10 +80,11 @@ export default function CrewStockView() {
 
     if (search.trim()) {
       const q = search.trim().toLowerCase()
+      const qNorm = q.replace(/^0+/, '')
       list = list.filter(i =>
         i.description.toLowerCase().includes(q) ||
         i.itemCode.toLowerCase().includes(q) ||
-        (i.barcode && i.barcode.includes(q)) ||
+        (i.barcode && (i.barcode.includes(q) || i.barcode.replace(/^0+/, '') === qNorm)) ||
         (i.orderCode && i.orderCode.includes(q))
       )
     }

@@ -48,12 +48,21 @@ export default function CrewScanView() {
     setExpiries([])
 
     try {
-      const results = await searchItems(code.trim(), 1)
+      let results = await searchItems(code.trim(), 5, true)
+      // UPC-A ↔ EAN-13: retry with leading zeros stripped if nothing matched
+      const stripped = code.trim().replace(/^0+/, '')
+      if (!results.items?.length && stripped !== code.trim()) {
+        results = await searchItems(stripped, 5, true)
+      }
       if (!results.items?.length) {
         setError('Product not found')
         return
       }
-      const found = results.items[0]
+      // Prefer exact barcode match (normalized), fall back to first result
+      const codeNorm = stripped
+      const found = results.items.find(i =>
+        i.barcode != null && i.barcode.replace(/^0+/, '') === codeNorm
+      ) ?? results.items[0]
       if (!mounted.current) return
       setItem(found)
 

@@ -38,9 +38,15 @@ export default function BulkAdjustSheet({ items, onClose, onSuccess }: BulkAdjus
 
   const handleScan = useCallback((code: string) => {
     setScannerOpen(false)
-    const item = barcodeMap.get(code)
+    // Try exact match, then leading-zero variants (UPC-A ↔ EAN-13)
+    let item: StockItem | undefined
+    const variants = [code]
+    if (code.startsWith('00')) variants.push(code.slice(2))
+    if (code.startsWith('0')) variants.push(code.slice(1))
+    variants.push('0' + code)
+    for (const v of variants) { item = barcodeMap.get(v); if (item) break }
     if (item && !addedCodes.has(item.itemCode)) {
-      setEntries(prev => [...prev, { item, newQty: '', status: 'pending' as const }])
+      setEntries(prev => [...prev, { item: item!, newQty: '', status: 'pending' as const }])
     } else if (!item) {
       setSearch(code)
     }
@@ -49,12 +55,13 @@ export default function BulkAdjustSheet({ items, onClose, onSuccess }: BulkAdjus
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
     const q = search.trim().toLowerCase()
+    const qNorm = q.replace(/^0+/, '')
     return items
       .filter(i => !addedCodes.has(i.itemCode) && i.barcode)
       .filter(i =>
         i.description.toLowerCase().includes(q) ||
         i.itemCode.toLowerCase().includes(q) ||
-        (i.barcode && i.barcode.includes(q)) ||
+        (i.barcode && (i.barcode.includes(q) || i.barcode.replace(/^0+/, '') === qNorm)) ||
         (i.orderCode && i.orderCode.includes(q))
       )
       .slice(0, 10)

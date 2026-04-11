@@ -30,9 +30,15 @@ export function useProductCodeLookup() {
         return byBarcode.get(barcode)?.orderCode || null
       },
 
-      /** Resolve any scanned/typed code (barcode, order code, item number) to a searchable barcode */
+      /** Resolve any scanned/typed code (barcode, order code, item number) to a searchable barcode.
+       *  Handles UPC-A ↔ EAN-13 leading-zero variations from scanners vs. POS storage. */
       resolveCode(code: string): string {
         if (byBarcode.has(code)) return code
+        // Try stripping leading zeros (scanner returns EAN-13, POS stores UPC-A)
+        if (code.startsWith('00') && byBarcode.has(code.slice(2))) return code.slice(2)
+        if (code.startsWith('0') && byBarcode.has(code.slice(1))) return code.slice(1)
+        // Try adding a leading zero (scanner returns UPC-A, POS stores EAN-13)
+        if (byBarcode.has('0' + code)) return '0' + code
         const bc = codeToBarcode.get(code.toLowerCase())
         return bc || code
       },

@@ -8,6 +8,17 @@ import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from '
 import LocationManagerDialog, { type CreatedLocation } from './LocationManagerDialog'
 import BarcodeScanner from '../BarcodeScanner'
 
+// UPC-A ↔ EAN-13 interop: scanners return leading zeros that POS may strip.
+// Generate all plausible key variants so the barcodeMap lookup succeeds.
+function barcodeVariants(code: string): string[] {
+  const set = new Set([code])
+  if (code.startsWith('00')) set.add(code.slice(2))
+  if (code.startsWith('0')) set.add(code.slice(1))
+  set.add('0' + code)
+  return [...set]
+}
+function normBarcode(bc: string): string { return bc.replace(/^0+/, '') }
+
 interface BulkLocationSheetProps {
   items: StockItem[]
   onClose: () => void
@@ -129,12 +140,13 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
     const q = search.trim().toLowerCase()
+    const qNorm = normBarcode(q)
     return items
       .filter(i => !addedCodes.has(i.itemCode))
       .filter(i =>
         i.description.toLowerCase().includes(q) ||
         i.itemCode.toLowerCase().includes(q) ||
-        (i.barcode && i.barcode.includes(q)) ||
+        (i.barcode && (i.barcode.includes(q) || normBarcode(i.barcode) === qNorm)) ||
         (i.orderCode && i.orderCode.includes(q))
       )
       .slice(0, 10)
@@ -161,31 +173,37 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
 
   const handleScan = useCallback(async (code: string) => {
     setScannerOpen(false)
-    // 1. Try the local cache first (instant)
-    const local = barcodeMap.get(code)
+    // 1. Try the local cache with leading-zero variants (UPC-A ↔ EAN-13)
+    let local: StockItem | undefined
+    for (const v of barcodeVariants(code)) {
+      local = barcodeMap.get(v)
+      if (local) break
+    }
     if (local) {
       if (!addedCodes.has(local.itemCode)) {
-        setEntries(prev => [...prev, local])
+        setEntries(prev => [...prev, local!])
         fetchLocForItem(local.itemCode)
       }
       return
     }
-    // 2. Not in local cache (item may be inactive, non-liquor, or barcode format
-    //    differs from what getStockLevels returned) — fall back to server search.
+    // 2. Server search — try the scanned code, then retry with zeros stripped
+    //    in case the POS stores a shorter form.
     setScanFinding(true)
     try {
-      const res = await searchItems(code, 10, true)
-      // Prefer an item whose barcode exactly matches the scanned code; if only
-      // one result comes back treat it as the match regardless.
+      let res = await searchItems(code, 10, true)
+      const stripped = code.replace(/^0+/, '')
+      if (res.items.length === 0 && stripped !== code) {
+        res = await searchItems(stripped, 10, true)
+      }
+      // Match by normalized barcode (ignore leading-zero differences)
+      const codeNorm = normBarcode(code)
       const found =
-        res.items.find(i => i.barcode === code) ??
+        res.items.find(i => i.barcode != null && normBarcode(i.barcode) === codeNorm) ??
         (res.items.length === 1 ? res.items[0] : null)
       if (found && !addedCodes.has(found.itemCode)) {
         setEntries(prev => [...prev, found])
         fetchLocForItem(found.itemCode)
       } else {
-        // No server match — surface the code in the search box so the user can
-        // pick manually or see the "nothing found" state.
         setSearch(code)
       }
     } catch {

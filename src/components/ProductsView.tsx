@@ -219,7 +219,9 @@ export default function ProductsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeInactive])
 
-  // Handle barcode scan — reset filters and do immediate server lookup
+  // Handle barcode scan — reset filters and do immediate server lookup.
+  // Retry with leading zeros stripped if the first search returns nothing
+  // (UPC-A ↔ EAN-13 format mismatch between scanner and POS).
   const handleScan = useCallback(async (code: string) => {
     setScannerOpen(false)
     setSegment('all')
@@ -228,6 +230,12 @@ export default function ProductsView() {
     setSearch(resolved)
     // Immediate server search (no debounce) for barcode scans, always inactive-aware
     await runServerSearch(resolved, true)
+    // If nothing matched, retry with leading zeros stripped
+    const stripped = resolved.replace(/^0+/, '')
+    if (stripped !== resolved) {
+      setSearch(stripped)
+      await runServerSearch(stripped, true)
+    }
   }, [resolveCode, runServerSearch])
 
   // Handle action from ProductCard
@@ -296,9 +304,11 @@ export default function ProductsView() {
 
     // Search filter (client-side for instant feedback)
     // Barcode/order-code check: query can be a substring of the stored code (partial typing),
-    // but NOT the reverse — a short stored barcode matching inside a longer query causes false positives
+    // but NOT the reverse — a short stored barcode matching inside a longer query causes false positives.
+    // Leading-zero normalization handles UPC-A ↔ EAN-13 format differences.
     if (search.trim()) {
       const q = search.trim().toLowerCase()
+      const qNorm = q.replace(/^0+/, '')
       list = list.filter(i => {
         // Server already validated this item matches the search — always show it
         if (serverMatchCodes.has(i.itemCode)) return true
@@ -307,7 +317,7 @@ export default function ProductsView() {
         return (
           i.description.toLowerCase().includes(q) ||
           i.itemCode.toLowerCase().includes(q) ||
-          (bc && bc.includes(q)) ||
+          (bc && (bc.includes(q) || bc.replace(/^0+/, '') === qNorm)) ||
           (oc && oc.includes(q))
         )
       })
@@ -344,6 +354,7 @@ export default function ProductsView() {
     let filtered = items
     if (search.trim()) {
       const q = search.trim().toLowerCase()
+      const qNorm = q.replace(/^0+/, '')
       filtered = filtered.filter(i => {
         if (serverMatchCodes.has(i.itemCode)) return true
         const bc = i.barcode?.trim() ?? ''
@@ -351,7 +362,7 @@ export default function ProductsView() {
         return (
           i.description.toLowerCase().includes(q) ||
           i.itemCode.toLowerCase().includes(q) ||
-          (bc && bc.includes(q)) ||
+          (bc && (bc.includes(q) || bc.replace(/^0+/, '') === qNorm)) ||
           (oc && oc.includes(q))
         )
       })
