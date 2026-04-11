@@ -204,7 +204,10 @@ export default function ProductsView() {
     if (isBarcodeLike) {
       // Barcode input — search immediately so the item never flickers away.
       // Always include inactive on barcode scans so we never drop a real match.
+      // Also try with a leading zero prepended (UPC-A → EAN-13) since the POS
+      // may store the barcode in either format and the server does exact matching.
       runServerSearch(trimmed, true)
+      runServerSearch('0' + trimmed, true)
     } else {
       searchTimer.current = setTimeout(() => runServerSearch(trimmed, includeInactive), 300)
     }
@@ -220,7 +223,7 @@ export default function ProductsView() {
   }, [includeInactive])
 
   // Handle barcode scan — reset filters and do immediate server lookup.
-  // Retry with leading zeros stripped if the first search returns nothing
+  // Retry with leading-zero variants if the first search returns nothing
   // (UPC-A ↔ EAN-13 format mismatch between scanner and POS).
   const handleScan = useCallback(async (code: string) => {
     setScannerOpen(false)
@@ -230,11 +233,16 @@ export default function ProductsView() {
     setSearch(resolved)
     // Immediate server search (no debounce) for barcode scans, always inactive-aware
     await runServerSearch(resolved, true)
-    // If nothing matched, retry with leading zeros stripped
-    const stripped = resolved.replace(/^0+/, '')
-    if (stripped !== resolved) {
-      setSearch(stripped)
-      await runServerSearch(stripped, true)
+    // If no results appeared, try leading-zero variants (strip & add)
+    const variants = [
+      resolved.replace(/^0+/, ''),               // stripped
+      '0' + resolved,                             // one zero prepended
+      resolved.startsWith('00') ? resolved.slice(2) : null,
+      resolved.startsWith('0') ? resolved.slice(1) : null,
+    ].filter((v): v is string => v != null && v !== resolved && v.length >= 8)
+    for (const v of [...new Set(variants)]) {
+      setSearch(v)
+      await runServerSearch(v, true)
     }
   }, [resolveCode, runServerSearch])
 

@@ -48,18 +48,27 @@ export default function CrewScanView() {
     setExpiries([])
 
     try {
-      let results = await searchItems(code.trim(), 5, true)
-      // UPC-A ↔ EAN-13: retry with leading zeros stripped if nothing matched
-      const stripped = code.trim().replace(/^0+/, '')
-      if (!results.items?.length && stripped !== code.trim()) {
-        results = await searchItems(stripped, 5, true)
+      const trimmed = code.trim()
+      let results = await searchItems(trimmed, 5, true)
+      // UPC-A ↔ EAN-13: the POS may store with a different number of leading
+      // zeros. Try stripped and prepended variants until we get a hit.
+      if (!results.items?.length) {
+        const variants = new Set<string>()
+        if (trimmed.startsWith('0')) variants.add(trimmed.slice(1))
+        if (trimmed.startsWith('00')) variants.add(trimmed.slice(2))
+        variants.add('0' + trimmed)
+        variants.delete(trimmed)
+        for (const v of variants) {
+          results = await searchItems(v, 5, true)
+          if (results.items?.length) break
+        }
       }
       if (!results.items?.length) {
         setError('Product not found')
         return
       }
       // Prefer exact barcode match (normalized), fall back to first result
-      const codeNorm = stripped
+      const codeNorm = trimmed.replace(/^0+/, '')
       const found = results.items.find(i =>
         i.barcode != null && i.barcode.replace(/^0+/, '') === codeNorm
       ) ?? results.items[0]

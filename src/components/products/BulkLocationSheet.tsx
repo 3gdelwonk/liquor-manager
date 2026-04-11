@@ -186,14 +186,19 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
       }
       return
     }
-    // 2. Server search — try the scanned code, then retry with zeros stripped
-    //    in case the POS stores a shorter form.
+    // 2. Server search — try the scanned code, then retry with leading-zero
+    //    variants. The POS may store UPC-A as EAN-13 (prepended 0) or vice-versa,
+    //    and the server does exact barcode matching.
     setScanFinding(true)
     try {
       let res = await searchItems(code, 10, true)
-      const stripped = code.replace(/^0+/, '')
-      if (res.items.length === 0 && stripped !== code) {
-        res = await searchItems(stripped, 10, true)
+      if (res.items.length === 0) {
+        // Try all leading-zero variants until one hits
+        for (const v of barcodeVariants(code)) {
+          if (v === code) continue
+          res = await searchItems(v, 10, true)
+          if (res.items.length > 0) break
+        }
       }
       // Match by normalized barcode (ignore leading-zero differences)
       const codeNorm = normBarcode(code)
