@@ -28,16 +28,6 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     const scanner = new Html5Qrcode('barcode-reader')
     scannerRef.current = scanner
 
-    // videoConstraints: request high-res back camera and try to reset
-    // digital zoom to 1× (advanced constraint is silently ignored on cameras
-    // that don't expose the zoom API, so it's always safe to include).
-    const videoConstraints: MediaTrackConstraints = {
-      facingMode: { ideal: 'environment' },
-      width:  { ideal: 1920 },
-      height: { ideal: 1080 },
-      advanced: [{ zoom: 1 } as MediaTrackConstraintSet],
-    }
-
     // qrbox: use 85% of the shorter viewfinder dimension so the scan area
     // is as wide as possible. When a camera is zoomed in the barcode appears
     // large in-frame; a small fixed box would miss it entirely.
@@ -46,10 +36,23 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       return { width: Math.min(side, viewW - 4), height: Math.round(side * 0.55) }
     }
 
+    // Html5Qrcode requires the first arg to be exactly 1 key ({ facingMode } or
+    // { deviceId }). Full MediaTrackConstraints (resolution, zoom) go into the
+    // config's videoConstraints field instead.
     scanner
       .start(
-        videoConstraints,
-        { fps: 15, qrbox: qrboxFn, aspectRatio: 1.777 },
+        { facingMode: 'environment' },
+        {
+          fps: 15,
+          qrbox: qrboxFn,
+          aspectRatio: 1.777,
+          videoConstraints: {
+            facingMode: { ideal: 'environment' },
+            width:  { ideal: 1920 },
+            height: { ideal: 1080 },
+            advanced: [{ zoom: 1 } as MediaTrackConstraintSet],
+          } as MediaTrackConstraints,
+        },
         (decodedText) => {
           if (!activeRef.current) return
           activeRef.current = false
