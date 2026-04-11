@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { Search, X, Loader2, CheckCircle, MapPin, ScanBarcode } from 'lucide-react'
-import type { StockItem, StockLocation } from '../../lib/jarvis'
-import { getLocations } from '../../lib/jarvis'
+import { Search, X, Loader2, CheckCircle, AlertTriangle, MapPin, ScanBarcode } from 'lucide-react'
+import type { StockItem, StockLocation, ItemLocation } from '../../lib/jarvis'
+import { getLocations, getItemLocations } from '../../lib/jarvis'
 import { bulkAssignLocation } from '../../lib/jarvisActions'
 import { flattenLocations, buildLocationTree } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
@@ -91,6 +91,10 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   const [error, setError] = useState<string | null>(null)
 
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [itemLocMap, setItemLocMap] = useState<Map<string, ItemLocation[]>>(new Map())
+  const [locFetchingSet, setLocFetchingSet] = useState<Set<string>>(new Set())
+  const [perItemResult, setPerItemResult] = useState<Map<string, 'new' | 'already' | 'failed'>>(new Map())
+  const [assignedToId, setAssignedToId] = useState<number | null>(null)
 
   const addedCodes = useMemo(() => new Set(entries.map(e => e.itemCode)), [entries])
 
@@ -142,15 +146,28 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
       .finally(() => setLocLoading(false))
   }, [])
 
+  const fetchLocForItem = useCallback(async (itemCode: string) => {
+    setLocFetchingSet(prev => new Set(prev).add(itemCode))
+    try {
+      const locs = await getItemLocations(itemCode)
+      setItemLocMap(prev => new Map(prev).set(itemCode, locs))
+    } catch {
+      setItemLocMap(prev => new Map(prev).set(itemCode, []))
+    } finally {
+      setLocFetchingSet(prev => { const s = new Set(prev); s.delete(itemCode); return s })
+    }
+  }, [])
+
   const handleScan = useCallback((code: string) => {
     setScannerOpen(false)
     const item = barcodeMap.get(code)
     if (item && !addedCodes.has(item.itemCode)) {
       setEntries(prev => [...prev, item])
+      fetchLocForItem(item.itemCode)
     } else if (!item) {
       setSearch(code)
     }
-  }, [barcodeMap, addedCodes])
+  }, [barcodeMap, addedCodes, fetchLocForItem])
 
   async function handleAssignAll() {
     if (entries.length === 0) return
@@ -167,14 +184,51 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     setProcessing(true)
     setError(null)
     setResult(null)
+    setPerItemResult(new Map())
+    // Snapshot current location data before assigning so we can detect "already here"
+    const preMap = new Map(itemLocMap)
     try {
       const res = await bulkAssignLocation(targetId, entries.map(e => e.itemCode))
       if (res.success) {
-        setResult({
-          ok: res.assigned ?? entries.length,
-          failed: 0,
-          message: res.message ?? `${res.assigned ?? entries.length} item(s) assigned`,
+        // Re-fetch all item locations to get actual post-assign state
+        const fetched = await Promise.allSettled(
+          entries.map(async e => {
+            try {
+              const locs = await getItemLocations(e.itemCode)
+              return { itemCode: e.itemCode, locs }
+            } catch {
+              return { itemCode: e.itemCode, locs: [] as ItemLocation[] }
+            }
+          })
+        )
+        const postMap = new Map<string, ItemLocation[]>()
+        for (const r of fetched) {
+          if (r.status === 'fulfilled') postMap.set(r.value.itemCode, r.value.locs)
+        }
+        setItemLocMap(prev => {
+          const next = new Map(prev)
+          for (const [k, v] of postMap) next.set(k, v)
+          return next
         })
+        // Classify each item: 'new' = just assigned, 'already' = was there before, 'failed' = not at location
+        const perItem = new Map<string, 'new' | 'already' | 'failed'>()
+        for (const e of entries) {
+          const postLocs = postMap.get(e.itemCode) ?? []
+          const preLocs = preMap.get(e.itemCode) ?? []
+          const isHereNow = postLocs.some(l => l.locationId === targetId)
+          const wasHereBefore = preLocs.some(l => l.locationId === targetId)
+          perItem.set(e.itemCode, isHereNow ? (wasHereBefore ? 'already' : 'new') : 'failed')
+        }
+        setPerItemResult(perItem)
+        setAssignedToId(targetId)
+        const newCount = [...perItem.values()].filter(v => v === 'new').length
+        const alreadyCount = [...perItem.values()].filter(v => v === 'already').length
+        const failedCount = [...perItem.values()].filter(v => v === 'failed').length
+        const parts: string[] = []
+        if (newCount > 0) parts.push(`${newCount} newly assigned`)
+        if (alreadyCount > 0) parts.push(`${alreadyCount} already at this location`)
+        if (failedCount > 0) parts.push(`${failedCount} failed`)
+        setResult({ ok: newCount, failed: failedCount, message: parts.join(' · ') || 'No changes' })
       } else {
         // Surface server response detail so the user can diagnose on phone (no F12)
         const detail = res.message || (res.raw ? JSON.stringify(res.raw) : 'no detail')
@@ -293,7 +347,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
               {searchResults.map(item => (
                 <button
                   key={item.itemCode}
-                  onClick={() => { setEntries(prev => [...prev, item]); setSearch('') }}
+                  onClick={() => { setEntries(prev => [...prev, item]); fetchLocForItem(item.itemCode); setSearch('') }}
                   className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center justify-between border-b border-gray-50 last:border-0"
                 >
                   <div className="min-w-0">
@@ -316,19 +370,41 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
           ) : (
             <div className="space-y-1.5">
               <p className="text-xs text-gray-400 px-1">{entries.length} item{entries.length !== 1 ? 's' : ''} selected</p>
-              {entries.map(entry => (
-                <div key={entry.itemCode} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-800 truncate">{entry.description}</p>
-                    <p className="text-xs text-gray-400">{entry.barcode ?? entry.itemCode}</p>
+              {entries.map(entry => {
+                const isFetchingLoc = locFetchingSet.has(entry.itemCode)
+                const locResult = perItemResult.get(entry.itemCode)
+                const locs = itemLocMap.get(entry.itemCode)
+                let locBadge: React.ReactNode = null
+                if (isFetchingLoc) {
+                  locBadge = <Loader2 size={11} className="animate-spin text-gray-300 shrink-0" />
+                } else if (locResult === 'new') {
+                  const sc = locs?.find(l => l.locationId === assignedToId)?.shortCode
+                  locBadge = <span className="shrink-0 text-[10px] font-semibold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">✓ {sc ?? 'Assigned'}</span>
+                } else if (locResult === 'already') {
+                  const sc = locs?.find(l => l.locationId === assignedToId)?.shortCode
+                  locBadge = <span className="shrink-0 text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{sc ?? 'Already here'}</span>
+                } else if (locResult === 'failed') {
+                  locBadge = <span className="shrink-0 text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Failed</span>
+                } else if (locs && locs.length > 0) {
+                  locBadge = <span className="shrink-0 text-[10px] text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">{locs.map(l => l.shortCode).join(' · ')}</span>
+                } else if (locs && locs.length === 0) {
+                  locBadge = <span className="shrink-0 text-[10px] text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">No loc</span>
+                }
+                return (
+                  <div key={entry.itemCode} className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-800 truncate">{entry.description}</p>
+                      <p className="text-xs text-gray-400">{entry.barcode ?? entry.itemCode}</p>
+                    </div>
+                    {locBadge}
+                    {!processing && !result && (
+                      <button onClick={() => setEntries(prev => prev.filter(e => e.itemCode !== entry.itemCode))} className="text-gray-400 hover:text-red-500 shrink-0">
+                        <X size={16} />
+                      </button>
+                    )}
                   </div>
-                  {!processing && !result && (
-                    <button onClick={() => setEntries(prev => prev.filter(e => e.itemCode !== entry.itemCode))} className="text-gray-400 hover:text-red-500 shrink-0 ml-2">
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -337,11 +413,18 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         <div className="border-t border-gray-100 p-4 shrink-0">
           {result ? (
             <div className="text-center space-y-1">
-              <p className="text-sm font-medium text-green-600 flex items-center justify-center gap-1">
-                <CheckCircle size={14} />
-                {result.ok} item{result.ok !== 1 ? 's' : ''} assigned
-                {result.failed > 0 && <span className="text-red-600"> · {result.failed} failed</span>}
-              </p>
+              {result.failed > 0 && result.ok === 0 ? (
+                <p className="text-sm font-medium text-red-600 flex items-center justify-center gap-1">
+                  <AlertTriangle size={14} />
+                  {result.failed} item{result.failed !== 1 ? 's' : ''} failed
+                </p>
+              ) : (
+                <p className="text-sm font-medium text-green-600 flex items-center justify-center gap-1">
+                  <CheckCircle size={14} />
+                  {result.ok > 0 ? `${result.ok} newly assigned` : 'Done'}
+                  {result.failed > 0 && <span className="text-red-500 ml-1">· {result.failed} failed</span>}
+                </p>
+              )}
               <p className="text-xs text-gray-400">{result.message}</p>
               <button onClick={onClose} className="text-sm text-violet-600 underline">Close</button>
             </div>
