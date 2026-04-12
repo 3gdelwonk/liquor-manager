@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Search, X, Loader2, CheckCircle, AlertTriangle, MapPin, ScanBarcode } from 'lucide-react'
 import type { StockItem, StockLocation, ItemLocation } from '../../lib/jarvis'
 import { getLocations, getItemLocations, searchItems } from '../../lib/jarvis'
-import { bulkAssignLocation } from '../../lib/jarvisActions'
+import { bulkAssignLocation, assignItemLocation } from '../../lib/jarvisActions'
 import { flattenLocations, buildLocationTree } from '../../lib/locationUtils'
 import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
 import LocationManagerDialog, { type CreatedLocation } from './LocationManagerDialog'
@@ -266,35 +266,49 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     try {
       const res = await bulkAssignLocation(targetId, entries.map(e => e.itemCode))
       if (res.success) {
-        // Re-fetch all item locations to get actual post-assign state
-        const fetched = await Promise.allSettled(
-          entries.map(async e => {
-            try {
-              const locs = await getItemLocations(e.itemCode)
-              return { itemCode: e.itemCode, locs }
-            } catch {
-              return { itemCode: e.itemCode, locs: [] as ItemLocation[] }
-            }
-          })
-        )
-        const postMap = new Map<string, ItemLocation[]>()
-        for (const r of fetched) {
-          if (r.status === 'fulfilled') postMap.set(r.value.itemCode, r.value.locs)
+        // Helper: fetch one item's locations, normalised
+        const fetchLocs = async (itemCode: string): Promise<ItemLocation[]> => {
+          try { return await getItemLocations(itemCode) } catch { return [] }
         }
+
+        // First pass: re-fetch all locations to see what the bulk assign committed
+        const firstFetch = await Promise.all(entries.map(e => fetchLocs(e.itemCode)))
+        const postMap = new Map<string, ItemLocation[]>()
+        entries.forEach((e, i) => postMap.set(e.itemCode, firstFetch[i]))
+
+        // Classify after first pass
+        const classifyItem = (itemCode: string, locs: ItemLocation[]): 'new' | 'already' | 'failed' => {
+          const isHereNow = locs.some(l => l.locationId === targetId)
+          const wasHereBefore = (preMap.get(itemCode) ?? []).some(l => l.locationId === targetId)
+          return isHereNow ? (wasHereBefore ? 'already' : 'new') : 'failed'
+        }
+        const perItem = new Map<string, 'new' | 'already' | 'failed'>()
+        for (const e of entries) {
+          perItem.set(e.itemCode, classifyItem(e.itemCode, postMap.get(e.itemCode) ?? []))
+        }
+
+        // Second pass: retry any 'failed' items individually.
+        // bulkAssignLocation can silently skip items the server can't match
+        // (wrong itemCode format, inactive flag, etc.). The single-item endpoint
+        // uses a different code path and often succeeds where bulk does not.
+        const failedEntries = entries.filter(e => perItem.get(e.itemCode) === 'failed')
+        if (failedEntries.length > 0) {
+          await Promise.allSettled(
+            failedEntries.map(e => assignItemLocation(targetId, e.itemCode))
+          )
+          // Re-fetch only the retried items
+          const retryFetch = await Promise.all(failedEntries.map(e => fetchLocs(e.itemCode)))
+          failedEntries.forEach((e, i) => {
+            postMap.set(e.itemCode, retryFetch[i])
+            perItem.set(e.itemCode, classifyItem(e.itemCode, retryFetch[i]))
+          })
+        }
+
         setItemLocMap(prev => {
           const next = new Map(prev)
           for (const [k, v] of postMap) next.set(k, v)
           return next
         })
-        // Classify each item: 'new' = just assigned, 'already' = was there before, 'failed' = not at location
-        const perItem = new Map<string, 'new' | 'already' | 'failed'>()
-        for (const e of entries) {
-          const postLocs = postMap.get(e.itemCode) ?? []
-          const preLocs = preMap.get(e.itemCode) ?? []
-          const isHereNow = postLocs.some(l => l.locationId === targetId)
-          const wasHereBefore = preLocs.some(l => l.locationId === targetId)
-          perItem.set(e.itemCode, isHereNow ? (wasHereBefore ? 'already' : 'new') : 'failed')
-        }
         setPerItemResult(perItem)
         setAssignedToId(targetId)
         const newCount = [...perItem.values()].filter(v => v === 'new').length
@@ -475,7 +489,12 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                   <div key={entry.itemCode} className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-800 truncate">{entry.description}</p>
-                      <p className="text-xs text-gray-400">{entry.barcode ?? entry.itemCode}</p>
+                      <p className="text-xs text-gray-400">
+                        {entry.barcode ?? entry.itemCode}
+                        {entry.barcode && entry.itemCode !== entry.barcode && (
+                          <span className="ml-1.5 text-gray-300">#{entry.itemCode}</span>
+                        )}
+                      </p>
                     </div>
                     {locBadge}
                     {!processing && !result && (
