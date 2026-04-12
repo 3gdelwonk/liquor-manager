@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Search, X, Loader2, CheckCircle, AlertTriangle, MapPin, ScanBarcode } from 'lucide-react'
 import type { StockItem, StockLocation, ItemLocation } from '../../lib/jarvis'
 import { getLocations, getItemLocations, searchItems } from '../../lib/jarvis'
@@ -103,6 +103,8 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
 
   const [scannerOpen, setScannerOpen] = useState(false)
   const [scanFinding, setScanFinding] = useState(false)
+  const [serverHits, setServerHits] = useState<StockItem[]>([])
+  const serverTimer = useRef<ReturnType<typeof setTimeout>>()
   const [itemLocMap, setItemLocMap] = useState<Map<string, ItemLocation[]>>(new Map())
   const [locFetchingSet, setLocFetchingSet] = useState<Set<string>>(new Set())
   const [perItemResult, setPerItemResult] = useState<Map<string, 'new' | 'already' | 'failed'>>(new Map())
@@ -137,11 +139,31 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     return bayId ? all.filter(l => l.parentId === bayId) : all
   }, [flatLocs, bayId])
 
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    if (serverTimer.current) clearTimeout(serverTimer.current)
+    if (!value.trim()) { setServerHits([]); return }
+    const trimmed = value.trim()
+    const isBarcodeLike = /^\d{8,}$/.test(trimmed)
+    if (isBarcodeLike) {
+      searchItems(trimmed, 10, true).then(r => setServerHits(r.items)).catch(() => {})
+      searchItems('0' + trimmed, 10, true).then(r => setServerHits(prev => {
+        const map = new Map(prev.map(i => [i.itemCode, i]))
+        for (const item of r.items) if (!map.has(item.itemCode)) map.set(item.itemCode, item)
+        return [...map.values()]
+      })).catch(() => {})
+    } else {
+      serverTimer.current = setTimeout(() => {
+        searchItems(trimmed, 10, false).then(r => setServerHits(r.items)).catch(() => {})
+      }, 300)
+    }
+  }
+
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
     const q = search.trim().toLowerCase()
     const qNorm = normBarcode(q)
-    return items
+    const localMatches = items
       .filter(i => !addedCodes.has(i.itemCode))
       .filter(i =>
         i.description.toLowerCase().includes(q) ||
@@ -149,8 +171,10 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         (i.barcode && (i.barcode.includes(q) || normBarcode(i.barcode) === qNorm)) ||
         (i.orderCode && i.orderCode.includes(q))
       )
-      .slice(0, 10)
-  }, [search, items, addedCodes])
+    const localCodes = new Set(localMatches.map(i => i.itemCode))
+    const serverOnly = serverHits.filter(i => !localCodes.has(i.itemCode) && !addedCodes.has(i.itemCode))
+    return [...localMatches, ...serverOnly].slice(0, 10)
+  }, [search, items, addedCodes, serverHits])
 
   useEffect(() => {
     getLocations()
@@ -371,13 +395,13 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
               <input
                 type="text"
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => handleSearchChange(e.target.value)}
                 placeholder="Search or scan products..."
                 className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
                 disabled={processing}
               />
               {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
+                <button onClick={() => { setSearch(''); setServerHits([]) }} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
                   <X size={14} />
                 </button>
               )}
