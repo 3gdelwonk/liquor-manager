@@ -684,7 +684,20 @@ export async function getItemLocations(itemCode: string): Promise<ItemLocation[]
   const raw = await jarvisFetch<ItemLocation[] | { locations: ItemLocation[] }>(
     `/api/pos/locations/item/${encodeURIComponent(itemCode)}`
   );
-  return Array.isArray(raw) ? raw : raw.locations;
+  const list = Array.isArray(raw) ? raw : raw.locations;
+  // Normalize locationId — JARVISmart may return the ID under `id`, `locationID`,
+  // or `location_id` instead of `locationId`. Downstream checks (isHereNow, badge
+  // lookup) all use `l.locationId`, so ensure it is always populated.
+  return list.map(loc => {
+    if (typeof loc.locationId === 'number') return loc
+    const o = loc as unknown as Record<string, unknown>
+    for (const k of ['id', 'locationID', 'location_id']) {
+      const v = o[k]
+      if (typeof v === 'number' && !isNaN(v)) return { ...loc, locationId: v }
+      if (typeof v === 'string' && /^\d+$/.test(v)) return { ...loc, locationId: Number(v) }
+    }
+    return loc
+  })
 }
 
 export async function getLocationItems(locationId: number): Promise<StockItem[]> {
