@@ -94,6 +94,10 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           aspectRatio: 1.777,
           disableFlip: true,       // 1D barcodes don't need mirror check; saves CPU
           videoConstraints: {
+            // facingMode MUST live here — html5-qrcode ignores the first-arg
+            // facingMode when videoConstraints is present (it takes full ownership
+            // of the camera constraint, so the first arg is effectively unused).
+            facingMode: { ideal: 'environment' },
             width:     { ideal: 1920 },
             height:    { ideal: 1080 },
             frameRate: { ideal: 30, max: 60 },
