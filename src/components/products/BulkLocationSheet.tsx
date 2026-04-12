@@ -126,17 +126,20 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
   }, [locations])
 
   const zones = useMemo(() => flatLocs.filter(l => l.typeId === 4), [flatLocs])
+  // Each child level is empty until its parent is picked — strict cascade.
+  // `: all` was the old fallback; it caused every row to spill into the Row
+  // picker the moment any zone was selected (bayId still unset → show all rows).
   const aisles = useMemo(() => {
-    const all = flatLocs.filter(l => l.typeId === 1)
-    return zoneId ? all.filter(l => l.parentId === zoneId) : all
+    if (!zoneId) return []
+    return flatLocs.filter(l => l.typeId === 1 && l.parentId === zoneId)
   }, [flatLocs, zoneId])
   const bays = useMemo(() => {
-    const all = flatLocs.filter(l => l.typeId === 2)
-    return aisleId ? all.filter(l => l.parentId === aisleId) : all
+    if (!aisleId) return []
+    return flatLocs.filter(l => l.typeId === 2 && l.parentId === aisleId)
   }, [flatLocs, aisleId])
   const shelves = useMemo(() => {
-    const all = flatLocs.filter(l => l.typeId === 3)
-    return bayId ? all.filter(l => l.parentId === bayId) : all
+    if (!bayId) return []
+    return flatLocs.filter(l => l.typeId === 3 && l.parentId === bayId)
   }, [flatLocs, bayId])
 
   function handleSearchChange(value: string) {
