@@ -189,6 +189,10 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
             <div className="bg-blue-50 rounded-lg p-3 space-y-2">
               <p className="text-[10px] font-semibold text-blue-500 uppercase">Target Location</p>
               <div className="space-y-2.5">
+                {/* Progressive disclosure: each child level only appears once
+                    its parent is picked. Clearing a parent (tap the picked chip)
+                    removes every descendant level from the DOM, matching a
+                    tree-branch feel rather than a flat four-row grid. */}
                 <LocationLevelColumn
                   label="Zone"
                   options={zones}
@@ -196,27 +200,33 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
                   onSelectId={pickZone}
                   busy={busy}
                 />
-                <LocationLevelColumn
-                  label="Aisle"
-                  options={aisles}
-                  selectedId={aisleId}
-                  onSelectId={pickAisle}
-                  busy={busy}
-                />
-                <LocationLevelColumn
-                  label="Bay"
-                  options={bays}
-                  selectedId={bayId}
-                  onSelectId={pickBay}
-                  busy={busy}
-                />
-                <LocationLevelColumn
-                  label="Row"
-                  options={shelves}
-                  selectedId={shelfId}
-                  onSelectId={pickShelf}
-                  busy={busy}
-                />
+                {zoneId !== '' && (
+                  <LocationLevelColumn
+                    label="Aisle"
+                    options={aisles}
+                    selectedId={aisleId}
+                    onSelectId={pickAisle}
+                    busy={busy}
+                  />
+                )}
+                {aisleId !== '' && (
+                  <LocationLevelColumn
+                    label="Bay"
+                    options={bays}
+                    selectedId={bayId}
+                    onSelectId={pickBay}
+                    busy={busy}
+                  />
+                )}
+                {bayId !== '' && (
+                  <LocationLevelColumn
+                    label="Row"
+                    options={shelves}
+                    selectedId={shelfId}
+                    onSelectId={pickShelf}
+                    busy={busy}
+                  />
+                )}
               </div>
               <button
                 onClick={handleAssign}
