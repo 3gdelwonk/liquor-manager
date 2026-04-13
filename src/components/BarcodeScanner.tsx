@@ -8,16 +8,17 @@ interface BarcodeScannerProps {
   onClose: () => void
 }
 
-// Restrict to formats found in liquor retail — fewer formats = more CPU per format = better weak barcode detection.
+// Retail-essential formats only. Each extra format adds per-frame decode
+// cost on the ZXing JS fallback path (iOS Safari, old WebViews). Native
+// BarcodeDetector is less affected but still benefits.
+// Dropped vs. earlier: CODE_39 / ITF / QR_CODE — rarely present on individual
+// liquor products, and when absent they just waste scan cycles.
 const LIQUOR_FORMATS = [
-  Html5QrcodeSupportedFormats.EAN_13,   // standard retail (most products)
-  Html5QrcodeSupportedFormats.EAN_8,    // small-pack products
+  Html5QrcodeSupportedFormats.EAN_13,   // ~95% of retail (AU/EU)
   Html5QrcodeSupportedFormats.UPC_A,    // US imports
+  Html5QrcodeSupportedFormats.EAN_8,    // small-pack products
   Html5QrcodeSupportedFormats.UPC_E,    // compact UPC
   Html5QrcodeSupportedFormats.CODE_128, // supplier/logistics labels
-  Html5QrcodeSupportedFormats.CODE_39,  // some internal labels
-  Html5QrcodeSupportedFormats.ITF,      // outer carton barcodes
-  Html5QrcodeSupportedFormats.QR_CODE,  // QR labels / shelf tags
 ]
 
 export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScannerProps) {
@@ -88,9 +89,14 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         { facingMode: 'environment' },
         {
           fps: 20,
-          // Wide, short box matches the 3.5:1 aspect of EAN-13 / UPC-A.
-          // More horizontal pixels captured → better bar resolution at distance.
-          qrbox: { width: 340, height: 160 },
+          // NO qrbox. Previously this was 340×160 — ~2.6% of a 1920×1080 frame.
+          // html5-qrcode crops the video to qrbox and passes only that canvas
+          // to BarcodeDetector, so barcodes outside the crop were invisible to
+          // the detector even when visible to the user. Omitting qrbox defaults
+          // the scan region to the full viewfinder (html5-qrcode internal,
+          // setupUi line 488-489: `isNullOrUndefined(qrbox) ? full-viewfinder`),
+          // so every pixel the camera captures is fed to the detector. This is
+          // the single biggest sensitivity win available from config alone.
           aspectRatio: 1.777,
           disableFlip: true,       // 1D barcodes don't need mirror check; saves CPU
           videoConstraints: {
@@ -98,8 +104,12 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
             // facingMode when videoConstraints is present (it takes full ownership
             // of the camera constraint, so the first arg is effectively unused).
             facingMode: { ideal: 'environment' },
-            width:     { ideal: 1920 },
-            height:    { ideal: 1080 },
+            // Higher resolution = more pixels per bar. With full-frame scanning,
+            // bumping to 2560×1440 gives BarcodeDetector ~78% more data to
+            // resolve small, distant, or damaged barcodes. Browser negotiates
+            // down automatically if the camera doesn't support it.
+            width:     { ideal: 2560 },
+            height:    { ideal: 1440 },
             frameRate: { ideal: 30, max: 60 },
           } as MediaTrackConstraints,
         },
@@ -128,18 +138,17 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           const caps = track.getCapabilities?.() as Record<string, unknown> | undefined
 
           // ── Zoom ──────────────────────────────────────────────────────────
+          // Start at native minimum (1x) for the widest field of view. The
+          // previous 20% default narrowed the FOV, forcing users to hit a
+          // specific distance sweet spot — small misalignment meant no decode.
+          // With full-frame scanning + 2560×1440 resolution we no longer need
+          // to lean on zoom for pixel density. Users can tap + for shelf labels.
           const zoomCap = caps?.zoom as { min?: number; max?: number } | undefined
           if (zoomCap?.max && zoomCap.max > 1) {
             const min = zoomCap.min ?? 1
             const max = zoomCap.max
             setZoomRange({ min, max })
-            // Start at 20% of zoom range — enough extra reach for shelf labels
-            // without sacrificing the wide field of view for close scanning.
-            const defaultZoom = Math.min(min + (max - min) * 0.20, max)
-            if (defaultZoom > 1) {
-              track.applyConstraints({ advanced: [{ zoom: defaultZoom } as MediaTrackConstraintSet] } as MediaTrackConstraints)
-              setZoom(defaultZoom)
-            }
+            setZoom(min)
           }
 
           // ── Torch ──────────────────────────────────────────────────────────
@@ -152,6 +161,18 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           if (focusModes?.includes('continuous')) {
             track.applyConstraints({
               advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+            } as MediaTrackConstraints).catch(() => {})
+          }
+
+          // ── Continuous exposure ────────────────────────────────────────────
+          // Store lighting varies wildly (fluorescent aisles, shadowed shelves,
+          // direct sun in carparks). Continuous exposure re-meters each frame
+          // so glossy labels and dark corners both resolve. Silently skipped
+          // on devices that don't expose the capability.
+          const exposureModes = (caps as Record<string, unknown> | undefined)?.exposureMode as string[] | undefined
+          if (exposureModes?.includes('continuous')) {
+            track.applyConstraints({
+              advanced: [{ exposureMode: 'continuous' } as MediaTrackConstraintSet],
             } as MediaTrackConstraints).catch(() => {})
           }
         } catch { /* older browser — no extended camera API */ }
@@ -295,7 +316,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
               ? 'Align barcode in frame — tap ⚡ for low light'
               : 'Align barcode in frame — use zoom for distance'}
           </p>
-          <p className="text-[10px] text-white/30">EAN-13 · UPC · EAN-8 · Code 128</p>
+          <p className="text-[10px] text-white/30">EAN-13 · UPC-A · EAN-8 · UPC-E · Code 128</p>
         </div>
       )}
     </div>
