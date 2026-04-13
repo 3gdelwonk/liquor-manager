@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import { MapPin, Loader2, ArrowRight, Trash2, Plus, CheckCircle } from 'lucide-react'
+import { MapPin, Loader2, Trash2, Plus, CheckCircle, ArrowRight } from 'lucide-react'
 import type { StockItem, StockLocation, ItemLocation } from '../../lib/jarvis'
 import { getLocations, getItemLocations } from '../../lib/jarvis'
 import { assignItemLocation, removeItemLocation, moveItemLocation } from '../../lib/jarvisActions'
-import { flattenLocations, buildLocationTree, formatItemLocation, getTypeLabel } from '../../lib/locationUtils'
+import { flattenLocations, buildLocationTree, formatItemLocation } from '../../lib/locationUtils'
+import { LocationLevelColumn, resolveTargetLocation, hasAnyCascadeInput } from './LocationCascade'
 
 interface StockLocationSheetProps {
   item: StockItem
@@ -17,13 +18,47 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
-  const [selectedLocId, setSelectedLocId] = useState<number | ''>('')
-  const [moveTargetId, setMoveTargetId] = useState<number | ''>('')
+
+  // Cascading location picker — matches BulkLocationSheet behaviour so bays
+  // render in the same id-ascending (DB insertion) order and hidden branches
+  // (active === false) are filtered out consistently.
+  const [zoneId, setZoneId] = useState<number | ''>('')
+  const [aisleId, setAisleId] = useState<number | ''>('')
+  const [bayId, setBayId] = useState<number | ''>('')
+  const [shelfId, setShelfId] = useState<number | ''>('')
+
+  function pickZone(id: number | '')  { setZoneId(id);  setAisleId(''); setBayId(''); setShelfId('') }
+  function pickAisle(id: number | '') { setAisleId(id); setBayId('');  setShelfId('') }
+  function pickBay(id: number | '')   { setBayId(id);   setShelfId('') }
+  function pickShelf(id: number | '') { setShelfId(id) }
 
   const flatLocs = useMemo(() => {
     const tree = buildLocationTree(locations)
     return flattenLocations(tree)
   }, [locations])
+
+  const zones = useMemo(
+    () => flatLocs.filter(l => l.typeId === 4).sort((a, b) => a.id - b.id),
+    [flatLocs]
+  )
+  const aisles = useMemo(() => {
+    if (!zoneId) return []
+    return flatLocs
+      .filter(l => l.typeId === 1 && l.parentId === zoneId)
+      .sort((a, b) => a.id - b.id)
+  }, [flatLocs, zoneId])
+  const bays = useMemo(() => {
+    if (!aisleId) return []
+    return flatLocs
+      .filter(l => l.typeId === 2 && l.parentId === aisleId)
+      .sort((a, b) => a.id - b.id)
+  }, [flatLocs, aisleId])
+  const shelves = useMemo(() => {
+    if (!bayId) return []
+    return flatLocs
+      .filter(l => l.typeId === 3 && l.parentId === bayId)
+      .sort((a, b) => a.id - b.id)
+  }, [flatLocs, bayId])
 
   useEffect(() => {
     async function load() {
@@ -44,18 +79,34 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
     load()
   }, [item.itemCode])
 
+  function clearCascade() { pickZone('') }
+
+  function resolveTarget(): number | null {
+    return resolveTargetLocation([
+      { id: zoneId,  typeId: 4 },
+      { id: aisleId, typeId: 1 },
+      { id: bayId,   typeId: 2 },
+      { id: shelfId, typeId: 3 },
+    ])
+  }
+
   async function handleAssign() {
-    if (!selectedLocId) return
+    const targetId = resolveTarget()
+    if (!targetId) return
+    if (itemLocations.some(l => l.locationId === targetId)) {
+      setError('Already assigned to this location')
+      return
+    }
     setBusy(true)
     setError(null)
     setSuccessMsg(null)
     try {
-      const res = await assignItemLocation(Number(selectedLocId), item.itemCode)
+      const res = await assignItemLocation(targetId, item.itemCode)
       if (res.success) {
         setSuccessMsg('Item assigned to location')
         const updated = await getItemLocations(item.itemCode)
         setItemLocations(updated)
-        setSelectedLocId('')
+        clearCascade()
       } else {
         setError(res.message ?? 'Failed to assign')
       }
@@ -86,17 +137,18 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
   }
 
   async function handleMove(fromLoc: ItemLocation) {
-    if (!moveTargetId) return
+    const targetId = resolveTarget()
+    if (!targetId || targetId === fromLoc.locationId) return
     setBusy(true)
     setError(null)
     setSuccessMsg(null)
     try {
-      const res = await moveItemLocation(fromLoc.locationId, item.itemCode, Number(moveTargetId))
+      const res = await moveItemLocation(fromLoc.locationId, item.itemCode, targetId)
       if (res.success) {
         setSuccessMsg('Item moved')
         const updated = await getItemLocations(item.itemCode)
         setItemLocations(updated)
-        setMoveTargetId('')
+        clearCascade()
       } else {
         setError(res.message ?? 'Failed to move')
       }
@@ -107,10 +159,14 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
     }
   }
 
-  const availableForAssign = useMemo(() => {
-    const assigned = new Set(itemLocations.map(il => il.locationId))
-    return flatLocs.filter(l => !assigned.has(l.id))
-  }, [flatLocs, itemLocations])
+  const cascadeLevels = [
+    { id: zoneId,  typeId: 4 },
+    { id: aisleId, typeId: 1 },
+    { id: bayId,   typeId: 2 },
+    { id: shelfId, typeId: 3 },
+  ]
+  const hasCascade = hasAnyCascadeInput(cascadeLevels)
+  const targetId = resolveTarget()
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -129,87 +185,94 @@ export default function StockLocationSheet({ item, onClose }: StockLocationSheet
           </div>
         ) : (
           <>
+            {/* Cascade target picker — shared by Assign and Move */}
+            <div className="bg-blue-50 rounded-lg p-3 space-y-2">
+              <p className="text-[10px] font-semibold text-blue-500 uppercase">Target Location</p>
+              <div className="space-y-2.5">
+                <LocationLevelColumn
+                  label="Zone"
+                  options={zones}
+                  selectedId={zoneId}
+                  onSelectId={pickZone}
+                  busy={busy}
+                />
+                <LocationLevelColumn
+                  label="Aisle"
+                  options={aisles}
+                  selectedId={aisleId}
+                  onSelectId={pickAisle}
+                  busy={busy}
+                />
+                <LocationLevelColumn
+                  label="Bay"
+                  options={bays}
+                  selectedId={bayId}
+                  onSelectId={pickBay}
+                  busy={busy}
+                />
+                <LocationLevelColumn
+                  label="Row"
+                  options={shelves}
+                  selectedId={shelfId}
+                  onSelectId={pickShelf}
+                  busy={busy}
+                />
+              </div>
+              <button
+                onClick={handleAssign}
+                disabled={busy || !hasCascade}
+                className="w-full mt-1 py-2 bg-violet-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                Assign to Location
+              </button>
+            </div>
+
             {/* Current locations */}
             <div className="space-y-2">
               <p className="text-xs font-semibold text-gray-500 uppercase">Current Location{itemLocations.length !== 1 ? 's' : ''}</p>
               {itemLocations.length === 0 ? (
                 <p className="text-xs text-gray-400">Not assigned to any location</p>
               ) : (
-                itemLocations.map(loc => (
-                  <div key={loc.locationId} className="bg-gray-50 rounded-lg p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <MapPin size={14} className="text-violet-500 shrink-0" />
-                        <div className="min-w-0">
-                          <span className="text-sm font-medium text-gray-800 block truncate">
-                            {formatItemLocation(loc)}
-                          </span>
-                          {loc.typeName && (
-                            <span className="text-[10px] text-gray-400">{loc.typeName}</span>
-                          )}
+                itemLocations.map(loc => {
+                  const canMoveHere = targetId != null && targetId !== loc.locationId
+                  return (
+                    <div key={loc.locationId} className="bg-gray-50 rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <MapPin size={14} className="text-violet-500 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="text-sm font-medium text-gray-800 block truncate">
+                              {formatItemLocation(loc)}
+                            </span>
+                            {loc.typeName && (
+                              <span className="text-[10px] text-gray-400">{loc.typeName}</span>
+                            )}
+                          </div>
                         </div>
+                        <button
+                          onClick={() => handleRemove(loc)}
+                          disabled={busy}
+                          className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 shrink-0"
+                          title="Remove from location"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                       <button
-                        onClick={() => handleRemove(loc)}
-                        disabled={busy}
-                        className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 shrink-0"
-                        title="Remove from location"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                    {/* Move controls */}
-                    <div className="flex items-center gap-2">
-                      <ArrowRight size={12} className="text-gray-400 shrink-0" />
-                      <select
-                        value={moveTargetId}
-                        onChange={e => setMoveTargetId(e.target.value ? Number(e.target.value) : '')}
-                        className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:ring-2 focus:ring-violet-300"
-                      >
-                        <option value="">Move to...</option>
-                        {flatLocs.filter(l => l.id !== loc.locationId).map(l => (
-                          <option key={l.id} value={l.id}>{l.path} ({getTypeLabel(l.typeId, l.typeName)})</option>
-                        ))}
-                      </select>
-                      <button
                         onClick={() => handleMove(loc)}
-                        disabled={busy || !moveTargetId}
-                        className="px-3 py-1.5 bg-violet-600 text-white text-xs font-medium rounded-lg disabled:opacity-50"
+                        disabled={busy || !canMoveHere}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white border border-violet-200 text-violet-700 text-xs font-semibold rounded-lg disabled:opacity-40 disabled:border-gray-200 disabled:text-gray-400"
+                        title={canMoveHere ? 'Move stock to the target location above' : 'Pick a different target above first'}
                       >
-                        Move
+                        <ArrowRight size={12} />
+                        Move here → target
                       </button>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
-
-            {/* Assign to location */}
-            {availableForAssign.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-gray-500 uppercase">Assign to Location</p>
-                <div className="flex gap-2">
-                  <select
-                    value={selectedLocId}
-                    onChange={e => setSelectedLocId(e.target.value ? Number(e.target.value) : '')}
-                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-violet-300"
-                  >
-                    <option value="">Select location...</option>
-                    {availableForAssign.map(l => (
-                      <option key={l.id} value={l.id}>{l.path} ({getTypeLabel(l.typeId, l.typeName)})</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={handleAssign}
-                    disabled={busy || !selectedLocId}
-                    className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 flex items-center gap-1"
-                  >
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                    Assign
-                  </button>
-                </div>
-              </div>
-            )}
           </>
         )}
 

@@ -125,21 +125,34 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     return flattenLocations(tree)
   }, [locations])
 
-  const zones = useMemo(() => flatLocs.filter(l => l.typeId === 4), [flatLocs])
+  // Each level is sorted by id ascending (DB insertion order). This matches
+  // how bays were physically laid out over time (e.g. SB1, SB2, S&LB1, S&LB2…)
+  // and gives a walk-the-store order rather than alphabetical, which would
+  // incorrectly put S&LB* before SB* ('&' < 'B' in ASCII).
+  const zones = useMemo(
+    () => flatLocs.filter(l => l.typeId === 4).sort((a, b) => a.id - b.id),
+    [flatLocs]
+  )
   // Each child level is empty until its parent is picked — strict cascade.
   // `: all` was the old fallback; it caused every row to spill into the Row
   // picker the moment any zone was selected (bayId still unset → show all rows).
   const aisles = useMemo(() => {
     if (!zoneId) return []
-    return flatLocs.filter(l => l.typeId === 1 && l.parentId === zoneId)
+    return flatLocs
+      .filter(l => l.typeId === 1 && l.parentId === zoneId)
+      .sort((a, b) => a.id - b.id)
   }, [flatLocs, zoneId])
   const bays = useMemo(() => {
     if (!aisleId) return []
-    return flatLocs.filter(l => l.typeId === 2 && l.parentId === aisleId)
+    return flatLocs
+      .filter(l => l.typeId === 2 && l.parentId === aisleId)
+      .sort((a, b) => a.id - b.id)
   }, [flatLocs, aisleId])
   const shelves = useMemo(() => {
     if (!bayId) return []
-    return flatLocs.filter(l => l.typeId === 3 && l.parentId === bayId)
+    return flatLocs
+      .filter(l => l.typeId === 3 && l.parentId === bayId)
+      .sort((a, b) => a.id - b.id)
   }, [flatLocs, bayId])
 
   function handleSearchChange(value: string) {
