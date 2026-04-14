@@ -59,5 +59,27 @@ export default defineConfig({
         ],
       },
     }),
+    // vite-plugin-pwa auto-injects `<link rel="manifest" href=".../manifest.webmanifest">`
+    // into every HTML entry using the main manifest URL. For the crew sub-app
+    // that means Safari reads the *main* manifest when you Add to Home Screen,
+    // picks up its start_url="./" (which resolves to /liquor-manager/), and
+    // launches the pinned crew app into the main UI. This post-transform runs
+    // after VitePWA's injection and rewrites the href on the crew entry to
+    // point at its own manifest (which resolves to /<base>/crew/manifest.webmanifest).
+    {
+      name: 'crew-manifest-rewrite',
+      enforce: 'post',
+      transformIndexHtml: {
+        order: 'post',
+        handler(html, ctx) {
+          const f = ctx.filename.replace(/\\/g, '/')
+          if (!f.endsWith('crew/index.html')) return html
+          return html.replace(
+            /<link rel="manifest"[^>]*>/,
+            '<link rel="manifest" href="./manifest.webmanifest">'
+          )
+        },
+      },
+    },
   ],
 })
