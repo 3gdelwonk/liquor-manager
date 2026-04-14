@@ -29,6 +29,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
+      workbox: {
+        // Exclude the /crew/ sub-app from the main navigation fallback.
+        // Without this, workbox's default NavigationRoute catches every
+        // navigation request and returns the main index.html, so the crew
+        // PWA launches the main app's bundle under the /crew/ URL.
+        navigateFallbackDenylist: [/^\/liquor-manager\/crew\//, /^\/crew\//],
+      },
       manifest: {
         name: 'Liquor Manager',
         short_name: 'Liquor',

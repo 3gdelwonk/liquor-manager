@@ -1,9 +1,20 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { Search, X, Loader2, CheckCircle, AlertCircle, Package, ScanBarcode } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
+import { searchItems } from '../../lib/jarvis'
 import { adjustStock } from '../../lib/jarvisActions'
 import { REASON_CODES } from './ProductCard'
 import BarcodeScanner from '../BarcodeScanner'
+
+// UPC-A ↔ EAN-13 interop — same helper shape used in BulkLocationSheet
+function barcodeVariants(code: string): string[] {
+  const set = new Set([code])
+  if (code.startsWith('00')) set.add(code.slice(2))
+  if (code.startsWith('0')) set.add(code.slice(1))
+  set.add('0' + code)
+  return [...set]
+}
+function normBarcode(bc: string): string { return bc.replace(/^0+/, '') }
 
 interface BulkAdjustSheetProps {
   items: StockItem[]
@@ -26,50 +37,103 @@ export default function BulkAdjustSheet({ items, onClose, onSuccess }: BulkAdjus
   const [processing, setProcessing] = useState(false)
   const [result, setResult] = useState<{ ok: number; failed: number } | null>(null)
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [scanFinding, setScanFinding] = useState(false)
+  const [serverHits, setServerHits] = useState<StockItem[]>([])
+  const serverTimer = useRef<ReturnType<typeof setTimeout>>()
 
   const addedCodes = useMemo(() => new Set(entries.map(e => e.item.itemCode)), [entries])
 
-  // Build barcode → item lookup for scanner
+  // Build barcode → item lookup for scanner (from the prop-supplied items).
+  // Crew opens this sheet with items=[] and relies on the server-side fallback
+  // below; parent opens with a populated list and gets instant local matching.
   const barcodeMap = useMemo(() => {
     const map = new Map<string, StockItem>()
     for (const i of items) if (i.barcode) map.set(i.barcode, i)
     return map
   }, [items])
 
-  const handleScan = useCallback((code: string) => {
+  const handleScan = useCallback(async (code: string) => {
     setScannerOpen(false)
-    // Try exact match, then leading-zero variants (UPC-A ↔ EAN-13)
-    let item: StockItem | undefined
-    const variants = [code]
-    if (code.startsWith('00')) variants.push(code.slice(2))
-    if (code.startsWith('0')) variants.push(code.slice(1))
-    variants.push('0' + code)
-    for (const v of variants) { item = barcodeMap.get(v); if (item) break }
-    if (item && !addedCodes.has(item.itemCode)) {
-      setEntries(prev => [...prev, { item: item!, newQty: '', status: 'pending' as const }])
-    } else if (!item) {
+    // 1. Try the local cache with leading-zero variants (UPC-A ↔ EAN-13)
+    let local: StockItem | undefined
+    for (const v of barcodeVariants(code)) {
+      local = barcodeMap.get(v)
+      if (local) break
+    }
+    if (local) {
+      if (!addedCodes.has(local.itemCode)) {
+        setEntries(prev => [...prev, { item: local!, newQty: '', status: 'pending' as const }])
+      }
+      return
+    }
+    // 2. Server search fallback — try the scanned code, then leading-zero variants
+    setScanFinding(true)
+    try {
+      let res = await searchItems(code, 10, true)
+      if (res.items.length === 0) {
+        for (const v of barcodeVariants(code)) {
+          if (v === code) continue
+          res = await searchItems(v, 10, true)
+          if (res.items.length > 0) break
+        }
+      }
+      const codeNorm = normBarcode(code)
+      const found =
+        res.items.find(i => i.barcode != null && normBarcode(i.barcode) === codeNorm) ??
+        (res.items.length === 1 ? res.items[0] : null)
+      if (found && !addedCodes.has(found.itemCode)) {
+        setEntries(prev => [...prev, { item: found, newQty: '', status: 'pending' as const }])
+      } else {
+        setSearch(code)
+      }
+    } catch {
       setSearch(code)
+    } finally {
+      setScanFinding(false)
     }
   }, [barcodeMap, addedCodes])
+
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    if (serverTimer.current) clearTimeout(serverTimer.current)
+    if (!value.trim()) { setServerHits([]); return }
+    const trimmed = value.trim()
+    const isBarcodeLike = /^\d{8,}$/.test(trimmed)
+    if (isBarcodeLike) {
+      searchItems(trimmed, 10, true).then(r => setServerHits(r.items)).catch(() => {})
+      searchItems('0' + trimmed, 10, true).then(r => setServerHits(prev => {
+        const map = new Map(prev.map(i => [i.itemCode, i]))
+        for (const item of r.items) if (!map.has(item.itemCode)) map.set(item.itemCode, item)
+        return [...map.values()]
+      })).catch(() => {})
+    } else {
+      serverTimer.current = setTimeout(() => {
+        searchItems(trimmed, 10, false).then(r => setServerHits(r.items)).catch(() => {})
+      }, 300)
+    }
+  }
 
   const searchResults = useMemo(() => {
     if (!search.trim()) return []
     const q = search.trim().toLowerCase()
-    const qNorm = q.replace(/^0+/, '')
-    return items
+    const qNorm = normBarcode(q)
+    const localMatches = items
       .filter(i => !addedCodes.has(i.itemCode) && i.barcode)
       .filter(i =>
         i.description.toLowerCase().includes(q) ||
         i.itemCode.toLowerCase().includes(q) ||
-        (i.barcode && (i.barcode.includes(q) || i.barcode.replace(/^0+/, '') === qNorm)) ||
+        (i.barcode && (i.barcode.includes(q) || normBarcode(i.barcode) === qNorm)) ||
         (i.orderCode && i.orderCode.includes(q))
       )
-      .slice(0, 10)
-  }, [search, items, addedCodes])
+    const localCodes = new Set(localMatches.map(i => i.itemCode))
+    const serverOnly = serverHits.filter(i => !localCodes.has(i.itemCode) && !addedCodes.has(i.itemCode) && i.barcode)
+    return [...localMatches, ...serverOnly].slice(0, 10)
+  }, [search, items, addedCodes, serverHits])
 
   function addItem(item: StockItem) {
     setEntries(prev => [...prev, { item, newQty: '', status: 'pending' }])
     setSearch('')
+    setServerHits([])
   }
 
   function removeItem(itemCode: string) {
@@ -188,24 +252,24 @@ export default function BulkAdjustSheet({ items, onClose, onSuccess }: BulkAdjus
               <input
                 type="text"
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => handleSearchChange(e.target.value)}
                 placeholder="Search or scan products..."
                 className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
                 disabled={processing}
               />
               {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
+                <button onClick={() => handleSearchChange('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
                   <X size={14} />
                 </button>
               )}
             </div>
             <button
               onClick={() => setScannerOpen(true)}
-              disabled={processing}
+              disabled={processing || scanFinding}
               className="px-2.5 py-2 border border-gray-200 rounded-lg text-gray-500 hover:text-violet-600 hover:border-violet-300 disabled:opacity-50"
               title="Scan barcode"
             >
-              <ScanBarcode size={18} />
+              {scanFinding ? <Loader2 size={18} className="animate-spin" /> : <ScanBarcode size={18} />}
             </button>
           </div>
           {searchResults.length > 0 && (
