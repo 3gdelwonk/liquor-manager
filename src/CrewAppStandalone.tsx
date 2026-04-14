@@ -1,9 +1,10 @@
 import { Component, useEffect, useState, type ReactNode } from 'react'
-import { MapPin, DollarSign, Package, Printer } from 'lucide-react'
+import { MapPin, DollarSign, Package, Printer, Search } from 'lucide-react'
 import BulkLocationSheet from './components/products/BulkLocationSheet'
 import BulkAdjustSheet from './components/products/BulkAdjustSheet'
 import CrewPriceSheet from './components/crew/CrewPriceSheet'
 import CrewPrintWrapper from './components/crew/CrewPrintWrapper'
+import CrewLookupSheet from './components/crew/CrewLookupSheet'
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 
@@ -31,16 +32,18 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 // ─── Crew App ─────────────────────────────────────────────────────────────────
 
-type WidgetId = 'location' | 'price' | 'qoh' | 'print'
+type WidgetId = 'lookup' | 'location' | 'price' | 'qoh' | 'print'
 
 interface Widget {
   id: WidgetId
   label: string
   icon: ReactNode
   tint: string
+  wide?: boolean
 }
 
 const WIDGETS: Widget[] = [
+  { id: 'lookup',   label: 'Item Lookup',    icon: <Search size={32} />,     tint: 'bg-indigo-50 text-indigo-600 border-indigo-200', wide: true },
   { id: 'location', label: 'Bulk Location',  icon: <MapPin size={32} />,     tint: 'bg-violet-50 text-violet-600 border-violet-200' },
   { id: 'price',    label: 'Price / POS',    icon: <DollarSign size={32} />, tint: 'bg-green-50 text-green-600 border-green-200' },
   { id: 'qoh',      label: 'QOH Adjust',     icon: <Package size={32} />,    tint: 'bg-amber-50 text-amber-600 border-amber-200' },
@@ -83,7 +86,7 @@ export default function CrewAppStandalone() {
                 <button
                   key={w.id}
                   onClick={() => setActiveWidget(w.id)}
-                  className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 ${w.tint} py-8 active:scale-95 transition-transform`}
+                  className={`flex flex-col items-center justify-center gap-2 rounded-2xl border-2 ${w.tint} py-8 active:scale-95 transition-transform ${w.wide ? 'col-span-2' : ''}`}
                 >
                   {w.icon}
                   <span className="text-sm font-semibold">{w.label}</span>
@@ -92,6 +95,9 @@ export default function CrewAppStandalone() {
             </div>
           </div>
 
+          {activeWidget === 'lookup' && (
+            <CrewLookupSheet onClose={closeWidget} />
+          )}
           {activeWidget === 'location' && (
             <BulkLocationSheet items={[]} onClose={closeWidget} />
           )}
