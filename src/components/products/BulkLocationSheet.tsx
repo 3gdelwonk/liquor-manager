@@ -258,8 +258,35 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     }
   }, [barcodeMap, addedCodes, fetchLocForItem])
 
-  async function handleAssignAll() {
-    if (entries.length === 0) return
+  function handleAssignAnotherBatch() {
+    setEntries([])
+    setResult(null)
+    setPerItemResult(new Map())
+    setAssignedToId(null)
+    setError(null)
+    // Keep cascade (zoneId/aisleId/bayId/shelfId) so the next batch lands in
+    // the same spot without reselecting. Keep itemLocMap — it's just a cache.
+  }
+
+  function handleRetryFailed() {
+    const failedItems = entries.filter(e => perItemResult.get(e.itemCode) === 'failed')
+    if (failedItems.length === 0) return
+    setEntries(failedItems)
+    setResult(null)
+    setPerItemResult(new Map())
+    setAssignedToId(null)
+    setError(null)
+    // State updates are async, so pass the filtered list directly to the
+    // assign routine instead of waiting for React to flush.
+    void runAssign(failedItems)
+  }
+
+  function handleAssignAll() {
+    return runAssign(entries)
+  }
+
+  async function runAssign(items: StockItem[]) {
+    if (items.length === 0) return
     const targetId = resolveTargetLocation([
       { id: zoneId, typeId: 4 },
       { id: aisleId, typeId: 1 },
@@ -277,7 +304,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
     // Snapshot current location data before assigning so we can detect "already here"
     const preMap = new Map(itemLocMap)
     try {
-      const res = await bulkAssignLocation(targetId, entries.map(e => e.itemCode))
+      const res = await bulkAssignLocation(targetId, items.map(e => e.itemCode))
       if (res.success) {
         // Helper: fetch one item's locations, normalised
         const fetchLocs = async (itemCode: string): Promise<ItemLocation[]> => {
@@ -285,9 +312,9 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         }
 
         // First pass: re-fetch all locations to see what the bulk assign committed
-        const firstFetch = await Promise.all(entries.map(e => fetchLocs(e.itemCode)))
+        const firstFetch = await Promise.all(items.map(e => fetchLocs(e.itemCode)))
         const postMap = new Map<string, ItemLocation[]>()
-        entries.forEach((e, i) => postMap.set(e.itemCode, firstFetch[i]))
+        items.forEach((e, i) => postMap.set(e.itemCode, firstFetch[i]))
 
         // Classify after first pass
         const classifyItem = (itemCode: string, locs: ItemLocation[]): 'new' | 'already' | 'failed' => {
@@ -296,7 +323,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
           return isHereNow ? (wasHereBefore ? 'already' : 'new') : 'failed'
         }
         const perItem = new Map<string, 'new' | 'already' | 'failed'>()
-        for (const e of entries) {
+        for (const e of items) {
           perItem.set(e.itemCode, classifyItem(e.itemCode, postMap.get(e.itemCode) ?? []))
         }
 
@@ -304,7 +331,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         // bulkAssignLocation can silently skip items the server can't match
         // (wrong itemCode format, inactive flag, etc.). The single-item endpoint
         // uses a different code path and often succeeds where bulk does not.
-        const failedEntries = entries.filter(e => perItem.get(e.itemCode) === 'failed')
+        const failedEntries = items.filter(e => perItem.get(e.itemCode) === 'failed')
         if (failedEntries.length > 0) {
           await Promise.allSettled(
             failedEntries.map(e => assignItemLocation(targetId, e.itemCode))
@@ -331,18 +358,18 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         if (newCount > 0) parts.push(`${newCount} newly assigned`)
         if (alreadyCount > 0) parts.push(`${alreadyCount} already at this location`)
         if (failedCount > 0) parts.push(`${failedCount} failed`)
-        setResult({ ok: newCount, failed: failedCount, message: parts.join(' · ') || 'No changes' })
+        setResult({ ok: newCount + alreadyCount, failed: failedCount, message: parts.join(' · ') || 'No changes' })
       } else {
         // Surface server response detail so the user can diagnose on phone (no F12)
         const detail = res.message || (res.raw ? JSON.stringify(res.raw) : 'no detail')
         setResult({
           ok: 0,
-          failed: entries.length,
+          failed: items.length,
           message: `Server refused: ${detail} (location #${targetId})`,
         })
       }
     } catch (err) {
-      setResult({ ok: 0, failed: entries.length, message: (err as Error).message })
+      setResult({ ok: 0, failed: items.length, message: (err as Error).message })
     } finally {
       setProcessing(false)
     }
@@ -525,21 +552,60 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
         {/* Footer */}
         <div className="border-t border-gray-100 p-4 shrink-0">
           {result ? (
-            <div className="text-center space-y-1">
-              {result.failed > 0 && result.ok === 0 ? (
-                <p className="text-sm font-medium text-red-600 flex items-center justify-center gap-1">
-                  <AlertTriangle size={14} />
-                  {result.failed} item{result.failed !== 1 ? 's' : ''} failed
-                </p>
-              ) : (
-                <p className="text-sm font-medium text-green-600 flex items-center justify-center gap-1">
-                  <CheckCircle size={14} />
-                  {result.ok > 0 ? `${result.ok} newly assigned` : 'Done'}
-                  {result.failed > 0 && <span className="text-red-500 ml-1">· {result.failed} failed</span>}
-                </p>
-              )}
-              <p className="text-xs text-gray-400">{result.message}</p>
-              <button onClick={onClose} className="text-sm text-violet-600 underline">Close</button>
+            <div className="space-y-2">
+              <div className="text-center space-y-1">
+                {result.failed === 0 ? (
+                  <p className="text-sm font-medium text-green-600 flex items-center justify-center gap-1">
+                    <CheckCircle size={14} />
+                    {result.ok > 0 ? `All ${result.ok} assigned` : 'Done'}
+                  </p>
+                ) : result.ok === 0 ? (
+                  <p className="text-sm font-medium text-red-600 flex items-center justify-center gap-1">
+                    <AlertTriangle size={14} />
+                    All {result.failed} failed — nothing was assigned
+                  </p>
+                ) : (
+                  <p className="text-sm font-medium text-amber-600 flex items-center justify-center gap-1">
+                    <AlertTriangle size={14} />
+                    {result.ok} assigned · {result.failed} failed
+                  </p>
+                )}
+                <p className="text-xs text-gray-400">{result.message}</p>
+              </div>
+              <div className="flex gap-2">
+                {result.failed === 0 ? (
+                  <>
+                    <button
+                      onClick={handleAssignAnotherBatch}
+                      className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg"
+                    >
+                      Assign another batch
+                    </button>
+                    <button
+                      onClick={onClose}
+                      className="flex-1 py-2.5 bg-white border border-gray-200 text-gray-700 text-sm font-semibold rounded-lg"
+                    >
+                      Done
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleRetryFailed}
+                      disabled={processing}
+                      className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50"
+                    >
+                      Retry {result.failed} failed
+                    </button>
+                    <button
+                      onClick={onClose}
+                      className="flex-1 py-2.5 bg-white border border-gray-200 text-gray-700 text-sm font-semibold rounded-lg"
+                    >
+                      {result.ok === 0 ? 'Cancel' : 'Done'}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           ) : (
             <button
