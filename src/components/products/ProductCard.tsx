@@ -226,19 +226,30 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
     return flattenLocations(tree)
   }, [allLocations])
 
-  // Cascading filtered lists for each hierarchy level
-  const zones = useMemo(() => flatLocs.filter(l => l.typeId === 4), [flatLocs])
+  // Strict tree cascade: each level returns [] until its parent is picked.
+  // Child columns are conditionally rendered below so the user can't see
+  // unrelated branches from other zones/aisles/bays.
+  const zones = useMemo(
+    () => flatLocs.filter(l => l.typeId === 4).sort((a, b) => a.id - b.id),
+    [flatLocs],
+  )
   const aisles = useMemo(() => {
-    const all = flatLocs.filter(l => l.typeId === 1)
-    return zoneId ? all.filter(l => l.parentId === zoneId) : all
+    if (zoneId === '') return []
+    return flatLocs
+      .filter(l => l.typeId === 1 && l.parentId === zoneId)
+      .sort((a, b) => a.id - b.id)
   }, [flatLocs, zoneId])
   const bays = useMemo(() => {
-    const all = flatLocs.filter(l => l.typeId === 2)
-    return aisleId ? all.filter(l => l.parentId === aisleId) : all
+    if (aisleId === '') return []
+    return flatLocs
+      .filter(l => l.typeId === 2 && l.parentId === aisleId)
+      .sort((a, b) => a.id - b.id)
   }, [flatLocs, aisleId])
   const shelves = useMemo(() => {
-    const all = flatLocs.filter(l => l.typeId === 3)
-    return bayId ? all.filter(l => l.parentId === bayId) : all
+    if (bayId === '') return []
+    return flatLocs
+      .filter(l => l.typeId === 3 && l.parentId === bayId)
+      .sort((a, b) => a.id - b.id)
   }, [flatLocs, bayId])
 
   // Load all locations AND refetch this item's current assignments whenever
@@ -922,14 +933,17 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                     </div>
                   )}
 
-                  {/* Add Location button — only when nothing is being added/edited */}
-                  {!addingNew && editingLocationId == null && itemLocations.length === 0 && (
+                  {/* Add Location button — visible whenever the picker is closed.
+                      An item may hold multiple assignments simultaneously
+                      (many-to-many junction table), so this stays available
+                      even after the first location is added. */}
+                  {!addingNew && editingLocationId == null && (
                     <button
                       onClick={(e) => { e.stopPropagation(); startAddNewLocation() }}
                       disabled={locBusy}
                       className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
-                      <MapPin size={12} /> Add Location
+                      <MapPin size={12} /> {itemLocations.length > 0 ? 'Add Another Location' : 'Add Location'}
                     </button>
                   )}
 
@@ -980,27 +994,34 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                               onSelectId={setZone}
                               busy={locBusy}
                             />
-                            <LocationLevelColumn
-                              label="Aisle"
-                              options={aisles}
-                              selectedId={aisleId}
-                              onSelectId={setAisle}
-                              busy={locBusy}
-                            />
-                            <LocationLevelColumn
-                              label="Bay"
-                              options={bays}
-                              selectedId={bayId}
-                              onSelectId={setBay}
-                              busy={locBusy}
-                            />
-                            <LocationLevelColumn
-                              label="Row"
-                              options={shelves}
-                              selectedId={shelfId}
-                              onSelectId={setShelf}
-                              busy={locBusy}
-                            />
+                            {zoneId !== '' && (
+                              <LocationLevelColumn
+                                label="Aisle"
+                                options={aisles}
+                                selectedId={aisleId}
+                                onSelectId={setAisle}
+                                busy={locBusy}
+                              />
+                            )}
+                            {aisleId !== '' && (
+                              <LocationLevelColumn
+                                label="Bay"
+                                options={bays}
+                                selectedId={bayId}
+                                onSelectId={setBay}
+                                busy={locBusy}
+                                groupByPrefix
+                              />
+                            )}
+                            {bayId !== '' && (
+                              <LocationLevelColumn
+                                label="Row"
+                                options={shelves}
+                                selectedId={shelfId}
+                                onSelectId={setShelf}
+                                busy={locBusy}
+                              />
+                            )}
                           </div>
                         </>
                       )}
