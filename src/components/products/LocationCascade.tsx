@@ -12,18 +12,18 @@ export interface LevelOption {
 
 // ─── Short-code prefix extractor ────────────────────────────────────────────
 // Used by the bay picker to chunk chips into groups. A prefix is the leading
-// letter+digit run of the shortCode:
-//   "B1a"   → "B1"
-//   "B1"    → "B1"
-//   "C12top"→ "C12"
+// alpha run of the shortCode (letters before any digit):
+//   "WWB1"  → "WWB"     "WWB2"  → "WWB"
+//   "PMB1"  → "PMB"     "PMB12" → "PMB"
+//   "PB1"   → "PB"
+//   "B3"    → "B"
 //   "A"     → "A"
 // Falls back to the whole shortCode if nothing matches, and to "—" for empty.
 function getShortCodePrefix(code: string): string {
   if (!code) return '—'
-  const m = code.match(/^[A-Za-z]*\d+/)
-  if (m) return m[0]
-  const first = code.trim().charAt(0)
-  return first || '—'
+  const m = code.match(/^[A-Za-z]+/)
+  if (m) return m[0].toUpperCase()
+  return code.trim() || '—'
 }
 
 interface PrefixGroup {
@@ -153,13 +153,30 @@ export function LocationLevelColumn({
         </button>
         {showBubble && (
           <span
-            className="absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 rounded-md bg-gray-900 text-white text-[10px] shadow-lg pointer-events-none whitespace-nowrap"
+            className="absolute z-30 bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none"
             role="tooltip"
           >
-            <span className="block font-semibold">{o.name || o.shortCode}</span>
-            {o.path && o.path !== o.name && (
-              <span className="block opacity-70 font-normal">{o.path}</span>
-            )}
+            <span className="block px-3 py-1.5 rounded-lg bg-blue-700 text-white shadow-xl ring-2 ring-blue-200 whitespace-nowrap">
+              <span className="block text-[9px] font-semibold uppercase tracking-wide text-blue-200">
+                {o.shortCode || '—'}
+              </span>
+              <span className="block text-[12px] font-bold leading-tight">
+                {o.name || o.shortCode}
+              </span>
+              {o.path && o.path !== o.name && (
+                <span className="block text-[10px] font-normal text-blue-100 mt-0.5">
+                  {o.path}
+                </span>
+              )}
+            </span>
+            <span
+              className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0"
+              style={{
+                borderLeft: '5px solid transparent',
+                borderRight: '5px solid transparent',
+                borderTop: '5px solid rgb(29 78 216)',
+              }}
+            />
           </span>
         )}
       </span>
