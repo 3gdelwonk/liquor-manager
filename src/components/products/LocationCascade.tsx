@@ -64,6 +64,12 @@ function groupByPrefixFn(options: LevelOption[]): PrefixGroup[] {
 
 const LONG_PRESS_MS = 450
 
+interface RevealState {
+  id: number
+  x: number      // viewport x of chip center
+  top: number    // viewport y of chip top
+}
+
 export function LocationLevelColumn({
   label,
   options,
@@ -81,8 +87,10 @@ export function LocationLevelColumn({
 }) {
   const isEmpty = options.length === 0
 
-  // Long-press state is shared across all chips in this column.
-  const [revealed, setRevealed] = useState<number | null>(null)
+  // Long-press state is shared across all chips in this column. Positioned
+  // via viewport coordinates so the bubble escapes any parent overflow/
+  // clipping and can be clamped to stay on-screen at corner chips.
+  const [revealed, setRevealed] = useState<RevealState | null>(null)
   const pressTimer = useRef<number | null>(null)
   const pressedLong = useRef(false)
 
@@ -92,16 +100,34 @@ export function LocationLevelColumn({
     setRevealed(null)
   }, [options])
 
+  // Dismiss on scroll/resize — the cached coords would otherwise drift.
+  useEffect(() => {
+    if (!revealed) return
+    const dismiss = () => setRevealed(null)
+    window.addEventListener('scroll', dismiss, true)
+    window.addEventListener('resize', dismiss)
+    return () => {
+      window.removeEventListener('scroll', dismiss, true)
+      window.removeEventListener('resize', dismiss)
+    }
+  }, [revealed])
+
   useEffect(() => () => {
     if (pressTimer.current != null) window.clearTimeout(pressTimer.current)
   }, [])
 
-  function startPress(id: number) {
+  function reveal(id: number, el: HTMLElement | null) {
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setRevealed({ id, x: r.left + r.width / 2, top: r.top })
+  }
+
+  function startPress(id: number, el: HTMLElement | null) {
     if (pressTimer.current != null) window.clearTimeout(pressTimer.current)
     pressedLong.current = false
     pressTimer.current = window.setTimeout(() => {
       pressedLong.current = true
-      setRevealed(id)
+      reveal(id, el)
       pressTimer.current = null
     }, LONG_PRESS_MS)
   }
@@ -127,59 +153,89 @@ export function LocationLevelColumn({
 
   function renderChip(o: LevelOption) {
     const picked = selectedId === o.id
-    const showBubble = revealed === o.id
     return (
-      <span key={o.id} className="relative inline-block">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={(e) => handleChipClick(e, o, picked)}
-          onContextMenu={(e) => { e.preventDefault(); setRevealed(showBubble ? null : o.id) }}
-          onTouchStart={() => startPress(o.id)}
-          onTouchEnd={cancelPress}
-          onTouchMove={cancelPress}
-          onTouchCancel={cancelPress}
-          onMouseDown={() => startPress(o.id)}
-          onMouseUp={cancelPress}
-          onMouseLeave={cancelPress}
-          className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold border-2 transition-colors disabled:opacity-50 ${
-            picked
-              ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
-              : 'bg-white text-blue-700 border-blue-200 hover:border-blue-400 active:bg-blue-50'
-          }`}
-          title={o.path}
-        >
-          {o.shortCode || o.name}
-        </button>
-        {showBubble && (
-          <span
-            className="absolute z-30 bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none"
-            role="tooltip"
-          >
-            <span className="block px-3 py-1.5 rounded-lg bg-blue-700 text-white shadow-xl ring-2 ring-blue-200 whitespace-nowrap">
-              <span className="block text-[9px] font-semibold uppercase tracking-wide text-blue-200">
-                {o.shortCode || '—'}
-              </span>
-              <span className="block text-[12px] font-bold leading-tight">
-                {o.name || o.shortCode}
-              </span>
-              {o.path && o.path !== o.name && (
-                <span className="block text-[10px] font-normal text-blue-100 mt-0.5">
-                  {o.path}
-                </span>
-              )}
-            </span>
-            <span
-              className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0"
-              style={{
-                borderLeft: '5px solid transparent',
-                borderRight: '5px solid transparent',
-                borderTop: '5px solid rgb(29 78 216)',
-              }}
-            />
-          </span>
-        )}
-      </span>
+      <button
+        key={o.id}
+        type="button"
+        disabled={busy}
+        onClick={(e) => handleChipClick(e, o, picked)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          if (revealed?.id === o.id) setRevealed(null)
+          else reveal(o.id, e.currentTarget)
+        }}
+        onTouchStart={(e) => startPress(o.id, e.currentTarget)}
+        onTouchEnd={cancelPress}
+        onTouchMove={cancelPress}
+        onTouchCancel={cancelPress}
+        onMouseDown={(e) => startPress(o.id, e.currentTarget)}
+        onMouseUp={cancelPress}
+        onMouseLeave={cancelPress}
+        className={`px-2.5 py-1.5 rounded-md text-[11px] font-semibold border-2 transition-colors disabled:opacity-50 ${
+          picked
+            ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
+            : 'bg-white text-blue-700 border-blue-200 hover:border-blue-400 active:bg-blue-50'
+        }`}
+        title={o.path}
+      >
+        {o.shortCode || o.name}
+      </button>
+    )
+  }
+
+  // Viewport-fixed tooltip — rendered at the column level so it escapes any
+  // parent overflow clipping, and clamped horizontally to stay on-screen
+  // when the revealed chip is near the left or right edge.
+  function renderRevealTooltip() {
+    if (!revealed) return null
+    const opt = options.find(o => o.id === revealed.id)
+    if (!opt) return null
+    const BUBBLE_MAX = 260
+    const HALF = BUBBLE_MAX / 2
+    const MARGIN = 8
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 400
+    const clampedX = Math.max(HALF + MARGIN, Math.min(vw - HALF - MARGIN, revealed.x))
+    const arrowOffset = revealed.x - clampedX  // px the arrow shifts from center
+    return (
+      <div
+        role="tooltip"
+        style={{
+          position: 'fixed',
+          left: clampedX,
+          top: revealed.top,
+          transform: 'translate(-50%, calc(-100% - 10px))',
+          maxWidth: BUBBLE_MAX,
+          zIndex: 1000,
+          pointerEvents: 'none',
+        }}
+      >
+        <div className="px-3 py-2 rounded-lg bg-blue-700 text-white shadow-2xl ring-2 ring-blue-300">
+          <div className="text-[9px] font-bold uppercase tracking-wider text-blue-200">
+            {opt.shortCode || '—'}
+          </div>
+          <div className="text-[13px] font-bold leading-tight mt-0.5 break-words whitespace-normal">
+            {opt.name || opt.shortCode}
+          </div>
+          {opt.path && opt.path !== opt.name && (
+            <div className="text-[10px] font-normal text-blue-100 mt-1 break-words whitespace-normal">
+              {opt.path}
+            </div>
+          )}
+        </div>
+        <div
+          style={{
+            position: 'absolute',
+            left: `calc(50% + ${arrowOffset}px)`,
+            top: '100%',
+            transform: 'translateX(-50%)',
+            width: 0,
+            height: 0,
+            borderLeft: '6px solid transparent',
+            borderRight: '6px solid transparent',
+            borderTop: '6px solid rgb(29 78 216)',
+          }}
+        />
+      </div>
     )
   }
 
@@ -221,6 +277,7 @@ export function LocationLevelColumn({
           {options.map(renderChip)}
         </div>
       )}
+      {renderRevealTooltip()}
     </div>
   )
 }

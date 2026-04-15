@@ -431,6 +431,7 @@ export default function BulkLocationSheet({ items, onClose }: BulkLocationSheetP
                   selectedId={bayId}
                   onSelectId={pickBay}
                   busy={processing}
+                  groupByPrefix
                 />
                 <LocationLevelColumn
                   label="Row"
