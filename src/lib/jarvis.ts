@@ -33,53 +33,47 @@ export function isPriceLockedLocal(barcode: string): boolean {
   return getPriceLocks().has(barcode)
 }
 
+const JARVIS_TIMEOUT_MS = 15000;
+
+async function jarvisRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), JARVIS_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${getBaseUrl()}${path}`, {
+      method,
+      headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`JARVISmart ${method} ${path} → ${res.status}: ${text || res.statusText}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      throw new Error(`JARVISmart ${method} ${path} → timeout after ${JARVIS_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function jarvisFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${getBaseUrl()}${path}`, {
-    headers: {
-      'X-API-Key': getApiKey(),
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`);
-  return res.json() as Promise<T>;
+  return jarvisRequest<T>('GET', path);
 }
 
 export async function jarvisPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${getBaseUrl()}${path}`, {
-    method: 'POST',
-    headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`JARVISmart ${res.status}: ${text}`);
-  }
-  return res.json() as Promise<T>;
+  return jarvisRequest<T>('POST', path, body);
 }
 
 export async function jarvisPut<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${getBaseUrl()}${path}`, {
-    method: 'PUT',
-    headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`JARVISmart ${res.status}: ${text}`);
-  }
-  return res.json() as Promise<T>;
+  return jarvisRequest<T>('PUT', path, body);
 }
 
 export async function jarvisDelete<T>(path: string): Promise<T> {
-  const res = await fetch(`${getBaseUrl()}${path}`, {
-    method: 'DELETE',
-    headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`JARVISmart ${res.status}: ${text}`);
-  }
-  return res.json() as Promise<T>;
+  return jarvisRequest<T>('DELETE', path);
 }
 
 // ── Raw API shapes (actual JARVISmart response) ─────────────────────────────

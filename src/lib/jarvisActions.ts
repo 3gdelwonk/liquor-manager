@@ -212,6 +212,15 @@ export interface PrintLabelResult {
   labelCount?: number
   batchId?: string
   message?: string
+  error?: string
+}
+
+// Server sometimes returns ok:true with a message that admits failure
+// (e.g. "no printer assigned", "printer offline"). Treat those as errors.
+const PRINT_ERROR_KEYWORDS = /offline|fail|no printer|skipped|unavailable|not found|error|missing/i
+
+function messageLooksLikeError(message?: string): boolean {
+  return !!message && PRINT_ERROR_KEYWORDS.test(message)
 }
 
 export async function printLabel(
@@ -222,8 +231,19 @@ export async function printLabel(
   if (options?.printerId) body.printerId = options.printerId
   if (options?.count && options.count > 1) body.count = options.count
   if (options?.styleId) body.styleId = options.styleId
-  const res = await jarvisPost<PrintLabelResult>('/api/pos-actions/print-label', body)
-  return { ...res, success: res.ok ?? res.success }
+  try {
+    const res = await jarvisPost<PrintLabelResult>('/api/pos-actions/print-label', body)
+    const rawOk = res.ok ?? res.success ?? false
+    const serverError = !!res.error || messageLooksLikeError(res.message)
+    const success = rawOk && !serverError
+    if (!success) {
+      console.error('[printLabel] server reported failure:', { barcode, res })
+    }
+    return { ...res, ok: success, success, message: res.message ?? res.error }
+  } catch (err) {
+    console.error('[printLabel] threw:', { barcode, err })
+    throw err
+  }
 }
 
 // ── Print Queue Operations ──────────────────────────────────────────────────
@@ -231,11 +251,32 @@ export async function printLabel(
 export async function generateLabelQueue(
   type: 'label' | 'talker',
   printerId: number
-): Promise<{ success: boolean; message?: string }> {
-  const res = await jarvisPost<{ ok?: boolean; success?: boolean; message?: string }>(
-    '/api/pos/label-queue/generate', { type, printerId }
-  )
-  return { success: res.ok ?? res.success ?? false, message: res.message }
+): Promise<{ success: boolean; message?: string; labelCount?: number; jobId?: string }> {
+  try {
+    const res = await jarvisPost<{
+      ok?: boolean
+      success?: boolean
+      message?: string
+      error?: string
+      labelCount?: number
+      jobId?: string
+    }>('/api/pos/label-queue/generate', { type, printerId })
+    const rawOk = res.ok ?? res.success ?? false
+    const serverError = !!res.error || messageLooksLikeError(res.message)
+    const success = rawOk && !serverError
+    if (!success) {
+      console.error('[generateLabelQueue] server reported failure:', { type, printerId, res })
+    }
+    return {
+      success,
+      message: res.message ?? res.error,
+      labelCount: res.labelCount,
+      jobId: res.jobId,
+    }
+  } catch (err) {
+    console.error('[generateLabelQueue] threw:', { type, printerId, err })
+    throw err
+  }
 }
 
 export async function removeFromQueue(
