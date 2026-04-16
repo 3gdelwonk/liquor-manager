@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, memo, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, DollarSign, Tag, MapPin,
   Printer, Check, Loader2, Calendar, RefreshCw, Lock, Unlock,
-  Box, Truck, Trash2, Power, PowerOff, Pencil, X,
+  Box, Truck, Trash2, Power, PowerOff, Pencil, X, TrendingUp,
 } from 'lucide-react'
-import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department } from '../../lib/jarvis'
-import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList } from '../../lib/jarvis'
+import type { StockItem, LivePromotion, OrderInfo, PosStatus, StockLocation, ItemLocation, Department, ItemSalesData } from '../../lib/jarvis'
+import { getOrderInfo, getPosStatus, setPriceLockLocal, getLocations, getItemLocations, getDepartmentList, getItemSales } from '../../lib/jarvis'
 import { adjustStock, changePriceOnly, togglePriceLock, assignItemLocation, removeItemLocation, changeDepartment, setItemActive, changeCostPrice } from '../../lib/jarvisActions'
 import { addActiveChange, addSyncItem } from '../../lib/pendingPosChanges'
 import { flattenLocations, buildLocationTree, buildItemBreadcrumb } from '../../lib/locationUtils'
@@ -110,6 +110,8 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   const [expanded, setExpanded] = useState(false)
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
   const [posStatus, setPosStatus] = useState<PosStatus | null>(null)
+  const [itemSales, setItemSales] = useState<ItemSalesData | null>(null)
+  const [showSalesPanel, setShowSalesPanel] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const detailLoaded = useRef(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -215,13 +217,33 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
       getOrderInfo(item.itemCode),
       item.barcode ? getPosStatus(item.barcode) : Promise.resolve(null),
       getItemLocations(item.itemCode),
-    ]).then(([oi, ps, locs]) => {
+      getItemSales(item.itemCode, 365),
+    ]).then(([oi, ps, locs, sales]) => {
       if (!mounted.current) return
       if (oi.status === 'fulfilled' && oi.value) setOrderInfo(oi.value)
       if (ps.status === 'fulfilled' && ps.value) setPosStatus(ps.value as PosStatus)
       if (locs.status === 'fulfilled' && locs.value) setItemLocations(locs.value as ItemLocation[])
+      if (sales.status === 'fulfilled' && sales.value) setItemSales(sales.value as ItemSalesData)
     }).finally(() => { if (mounted.current) setDetailLoading(false) })
   }, [expanded, item.itemCode, item.barcode])
+
+  // Aggregate sales quantities over 1D / 1W / 1M / 1Y windows from the 365d series
+  const salesAggregates = useMemo(() => {
+    if (!itemSales) return null
+    const now = Date.now()
+    const DAY = 24 * 60 * 60 * 1000
+    let d1 = 0, d7 = 0, d30 = 0, d365 = 0
+    for (const s of itemSales.dailySales) {
+      const ts = new Date(s.date).getTime()
+      if (Number.isNaN(ts)) continue
+      const age = (now - ts) / DAY
+      if (age < 1) d1 += s.qty
+      if (age < 7) d7 += s.qty
+      if (age < 30) d30 += s.qty
+      if (age < 365) d365 += s.qty
+    }
+    return { d1, d7, d30, d365 }
+  }, [itemSales])
 
   // Flatten hierarchical locations for dropdown
   const flatLocs = useMemo(() => {
@@ -721,9 +743,66 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                   })()}
                   <MetricCell label="Avg/Day" value={item.avgDayQty.toFixed(1)} />
                   <MetricCell label="Avg/Week" value={item.avgWeekQty.toFixed(1)} />
-                  <MetricCell label="Reorder" value={String(item.reorderLevel)} />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowSalesPanel(p => !p) }}
+                    className={`text-center rounded-lg py-1 -my-1 transition-colors ring-1 ${
+                      showSalesPanel
+                        ? 'bg-indigo-100 ring-indigo-300'
+                        : 'ring-transparent hover:bg-gray-200/60 hover:ring-gray-300'
+                    }`}
+                  >
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide flex items-center justify-center gap-0.5">
+                      <TrendingUp size={9} /> Sales 7d
+                    </p>
+                    <p className="text-sm font-semibold text-gray-800">
+                      {salesAggregates ? salesAggregates.d7 : <Loader2 size={12} className="animate-spin inline" />}
+                    </p>
+                  </button>
                 </div>
               </div>
+
+              {/* Sales history panel — aggregates + per-date qty */}
+              {showSalesPanel && (
+                <div className="bg-indigo-50/60 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-1.5 text-[10px] font-semibold text-indigo-700 uppercase">
+                    <TrendingUp size={10} /> Sales History
+                    {itemSales && <span className="ml-auto text-gray-400 normal-case tracking-normal">{itemSales.dailySales.length} day{itemSales.dailySales.length === 1 ? '' : 's'} with sales</span>}
+                  </div>
+
+                  {!salesAggregates ? (
+                    <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+                      <Loader2 size={12} className="animate-spin" /> Loading sales...
+                    </div>
+                  ) : (
+                    <>
+                      {/* Aggregate tiles */}
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <AggregateTile label="1D" qty={salesAggregates.d1} />
+                        <AggregateTile label="1W" qty={salesAggregates.d7} />
+                        <AggregateTile label="1M" qty={salesAggregates.d30} />
+                        <AggregateTile label="1Y" qty={salesAggregates.d365} />
+                      </div>
+
+                      {/* Per-date list (most recent first) */}
+                      {itemSales && itemSales.dailySales.length > 0 ? (
+                        <div className="max-h-44 overflow-y-auto space-y-0.5 pt-1">
+                          {[...itemSales.dailySales].reverse().map(s => (
+                            <div key={s.date} className="flex items-center justify-between text-[11px] px-2 py-1 bg-white rounded">
+                              <span className="text-gray-600 flex items-center gap-1">
+                                <Calendar size={9} className="text-gray-400" />
+                                {fmtDateFull(s.date)}
+                              </span>
+                              <span className="font-semibold text-gray-800">{s.qty} unit{s.qty === 1 ? '' : 's'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-gray-400 text-center py-2">No sales in the last 365 days</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Supplier/order info — compact one-liner */}
               {orderInfo && (orderInfo.supplier || orderInfo.orderCodeRaw || orderInfo.cartonQty) && (
@@ -1229,6 +1308,15 @@ function MetricCell({ label, value, color, sub }: { label: string; value: string
       <p className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</p>
       <p className={`text-sm font-semibold ${color ?? 'text-gray-800'}`}>{value}</p>
       {sub}
+    </div>
+  )
+}
+
+function AggregateTile({ label, qty }: { label: string; qty: number }) {
+  return (
+    <div className="bg-white rounded-md py-1.5 text-center ring-1 ring-indigo-100">
+      <p className="text-[9px] text-indigo-500 uppercase tracking-wide font-medium">{label}</p>
+      <p className={`text-sm font-semibold ${qty > 0 ? 'text-gray-800' : 'text-gray-300'}`}>{qty}</p>
     </div>
   )
 }
