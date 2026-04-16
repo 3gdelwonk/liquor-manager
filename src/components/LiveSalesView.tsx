@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, TrendingUp, TrendingDown, Search, ScanBarcode, ChevronDown, ChevronUp } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
 import {
@@ -923,49 +923,55 @@ function SalesHistoryChart({ timeMode }: { timeMode: TimeMode }) {
   const [buckets, setBuckets] = useState<BucketData[]>(() => buildEmptyBuckets(timeMode, new Date()))
   const [progress, setProgress] = useState({ done: 0, total: cfg.rangeDays })
   const [loading, setLoading] = useState(true)
-  const cancelRef = useRef(false)
 
   useEffect(() => {
-    cancelRef.current = false
+    // Per-effect-run cancel flag (closure variable, NOT a shared ref).
+    // Critical because React StrictMode invokes the effect twice in dev,
+    // and switching tabs spawns a fresh run while the old loop is still
+    // mid-fetch. Each run must cancel only itself, otherwise old loops
+    // keep writing into new buckets via mismatched index Maps.
+    let cancelled = false
+
     const now = new Date()
+    const cfgLocal = HIST_CONFIG[timeMode]
     const initial = buildEmptyBuckets(timeMode, now)
     setBuckets(initial)
-    setProgress({ done: 0, total: HIST_CONFIG[timeMode].rangeDays })
+    setProgress({ done: 0, total: cfgLocal.rangeDays })
     setLoading(true)
 
     // Index buckets by key for O(1) lookup as days stream in
     const index = new Map<string, number>()
     initial.forEach((b, i) => index.set(b.key, i))
 
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (HIST_CONFIG[timeMode].rangeDays - 1))
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (cfgLocal.rangeDays - 1))
     const to = now;
 
     (async () => {
       let done = 0
-      // Aggregator that flushes to state at most every 100ms during streaming
       const pending = new Map<number, number>()
       let flushScheduled = false
       const flush = () => {
         flushScheduled = false
-        if (cancelRef.current || pending.size === 0) return
+        if (cancelled || pending.size === 0) return
+        const snapshot = [...pending.entries()]
+        pending.clear()
         setBuckets(prev => {
           const next = [...prev]
-          for (const [idx, addRev] of pending) {
-            next[idx] = { ...next[idx], revenue: next[idx].revenue + addRev }
+          for (const [idx, addRev] of snapshot) {
+            if (next[idx]) next[idx] = { ...next[idx], revenue: next[idx].revenue + addRev }
           }
           return next
         })
-        pending.clear()
       }
       const scheduleFlush = () => {
-        if (flushScheduled) return
+        if (flushScheduled || cancelled) return
         flushScheduled = true
         setTimeout(flush, 100)
       }
 
       try {
         for await (const { iso, data } of getSalesRange(from, to)) {
-          if (cancelRef.current) return
+          if (cancelled) return
           done++
           if (data) {
             const k = bucketKeyForDate(iso, timeMode)
@@ -975,15 +981,15 @@ function SalesHistoryChart({ timeMode }: { timeMode: TimeMode }) {
               scheduleFlush()
             }
           }
-          setProgress({ done, total: HIST_CONFIG[timeMode].rangeDays })
+          if (!cancelled) setProgress({ done, total: cfgLocal.rangeDays })
         }
         flush()
       } finally {
-        if (!cancelRef.current) setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     })()
 
-    return () => { cancelRef.current = true }
+    return () => { cancelled = true }
   }, [timeMode])
 
   const hasData = buckets.some(b => b.revenue > 0)
