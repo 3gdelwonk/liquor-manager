@@ -155,6 +155,9 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   // True when the user clicked "Add Location" to begin a fresh assignment.
   // The cascade picker is only visible when one of these flags is active.
   const [addingNew, setAddingNew] = useState(false)
+  // True when the user tapped "Change Location" and has 2+ assignments —
+  // highlights the location rows so they can tap which one to change.
+  const [pickingChangeMode, setPickingChangeMode] = useState(false)
   // Picker collapsed state — user can toggle the chip rows hidden/shown.
   const [pickerCollapsed, setPickerCollapsed] = useState(false)
 
@@ -341,6 +344,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   // place server-side until they fill the cascade and tap "Update Location",
   // at which point remove+assign replaces it.
   function startEditLocation(loc: ItemLocation) {
+    setPickingChangeMode(false)
     _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
     locationMemory.zoneId = ''; locationMemory.aisleId = ''
     locationMemory.bayId = ''; locationMemory.shelfId = ''
@@ -359,6 +363,7 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
   function cancelEditLocation() {
     setEditingLocationId(null)
     setAddingNew(false)
+    setPickingChangeMode(false)
     setPickerCollapsed(false)
     _setZoneId(''); _setAisleId(''); _setBayId(''); _setShelfId('')
     locationMemory.zoneId = ''; locationMemory.aisleId = ''
@@ -890,16 +895,26 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                       {itemLocations.map(loc => {
                         const breadcrumb = buildItemBreadcrumb(loc, flatLocs)
                         const isEditing = editingLocationId === loc.locationId
+                        // In "pick which to change" mode: highlight tappable rows
+                        const isPickingChange = !addingNew && editingLocationId == null && pickingChangeMode
                         return (
                           <div
                             key={loc.locationId}
-                            className={`bg-white rounded-lg px-2.5 py-2 ${isEditing ? 'ring-2 ring-blue-400' : ''}`}
+                            role={isPickingChange ? 'button' : undefined}
+                            tabIndex={isPickingChange ? 0 : undefined}
+                            onClick={isPickingChange ? (e) => { e.stopPropagation(); startEditLocation(loc) } : undefined}
+                            className={`bg-white rounded-lg px-2.5 py-2 transition-colors ${
+                              isEditing
+                                ? 'ring-2 ring-blue-400'
+                                : isPickingChange
+                                  ? 'ring-1 ring-blue-300 hover:bg-blue-50 cursor-pointer active:bg-blue-100'
+                                  : ''
+                            }`}
                           >
-                            <div className="grid grid-cols-4 gap-1.5 mb-1.5">
+                            <div className="grid grid-cols-4 gap-1.5">
                               {([4, 1, 2, 3] as const).map(typeId => {
                                 const cell = breadcrumb[typeId]
                                 const labels: Record<number, string> = { 4: 'Zone', 1: 'Aisle', 2: 'Bay', 3: 'Row' }
-                                // Prefer shortCode, fall back to name if missing
                                 const display = cell.shortCode ?? cell.name
                                 return (
                                   <div key={typeId} className="min-w-0">
@@ -911,40 +926,72 @@ function ProductCard({ item, promo, isTracked, onAction, onRefresh, onToggleLock
                                 )
                               })}
                             </div>
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); startEditLocation(loc) }}
-                                disabled={locBusy || isEditing}
-                                className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 px-2 py-0.5 flex items-center gap-0.5 disabled:opacity-50"
-                              >
-                                <Pencil size={11} /> Change Location
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleRemoveLocation(loc) }}
-                                disabled={locBusy}
-                                className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                            {/* Remove button only when NOT in picking-change mode */}
+                            {!isPickingChange && !isEditing && (
+                              <div className="flex items-center justify-end mt-1">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleRemoveLocation(loc) }}
+                                  disabled={locBusy}
+                                  className="p-1 text-red-400 hover:text-red-600 disabled:opacity-50"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )
                       })}
+                      {/* Prompt when picking which location to change */}
+                      {pickingChangeMode && !addingNew && editingLocationId == null && (
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-semibold text-blue-600 italic">Tap the location to change</p>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setPickingChangeMode(false) }}
+                            className="text-[10px] font-semibold text-gray-500 hover:text-gray-700 flex items-center gap-0.5"
+                          >
+                            <X size={11} /> Cancel
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* Add Location button — visible whenever the picker is closed.
-                      An item may hold multiple assignments simultaneously
-                      (many-to-many junction table), so this stays available
-                      even after the first location is added. */}
-                  {!addingNew && editingLocationId == null && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); startAddNewLocation() }}
-                      disabled={locBusy}
-                      className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
-                    >
-                      <MapPin size={12} /> {itemLocations.length > 0 ? 'Add Another Location' : 'Add Location'}
-                    </button>
+                  {/* Action buttons — two clear paths: Add or Change */}
+                  {!addingNew && editingLocationId == null && !pickingChangeMode && (
+                    itemLocations.length === 0 ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startAddNewLocation() }}
+                        disabled={locBusy}
+                        className="w-full py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      >
+                        <MapPin size={12} /> Add Location
+                      </button>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startAddNewLocation() }}
+                          disabled={locBusy}
+                          className="py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
+                        >
+                          <MapPin size={12} /> Add Location
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            // If only 1 location, jump straight to editing it
+                            if (itemLocations.length === 1) {
+                              startEditLocation(itemLocations[0])
+                            } else {
+                              setPickingChangeMode(true)
+                            }
+                          }}
+                          disabled={locBusy}
+                          className="py-2 bg-white text-blue-600 text-xs font-semibold rounded-lg border-2 border-blue-200 disabled:opacity-50 flex items-center justify-center gap-1.5 hover:border-blue-400"
+                        >
+                          <Pencil size={12} /> Change Location
+                        </button>
+                      </div>
+                    )
                   )}
 
                   {/* Cascade picker — only visible when adding new or changing existing */}
