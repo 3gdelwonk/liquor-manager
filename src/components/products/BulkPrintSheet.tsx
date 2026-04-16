@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Search, X, Loader2, CheckCircle, AlertCircle, Printer, Hash, Zap, ListPlus, Trash2, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Search, X, Loader2, CheckCircle, AlertCircle, Printer, Hash, Zap, ListPlus, Trash2, RefreshCw, ScanBarcode } from 'lucide-react'
 import type { StockItem } from '../../lib/jarvis'
-import { getPrinters, getLabelStyles, getLabelQueue, type Printer as PrinterType, type LabelStyle, type LabelQueueItem } from '../../lib/jarvis'
+import { getPrinters, getLabelStyles, getLabelQueue, searchItems, type Printer as PrinterType, type LabelStyle, type LabelQueueItem } from '../../lib/jarvis'
 import { printLabel, generateLabelQueue, removeFromQueue } from '../../lib/jarvisActions'
+import BarcodeScanner from '../BarcodeScanner'
 
 interface BulkPrintSheetProps {
   items: StockItem[]
@@ -101,6 +102,10 @@ export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) 
     if (tab === 'queue') loadQueue()
   }, [tab, selectedPrinter])
 
+  // Scanner
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [scanFinding, setScanFinding] = useState(false)
+
   // Search & add
   const addedCodes = useMemo(() => new Set(entries.map(e => e.item.itemCode)), [entries])
 
@@ -132,6 +137,61 @@ export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) 
       e.item.itemCode === itemCode ? { ...e, qty: Math.max(1, Math.min(50, qty)) } : e
     ))
   }
+
+  // Barcode scanner — same lookup pattern as BulkLocationSheet
+  const barcodeMap = useMemo(() => {
+    const map = new Map<string, StockItem>()
+    for (const i of items) if (i.barcode) map.set(i.barcode, i)
+    return map
+  }, [items])
+
+  function barcodeVariants(code: string): string[] {
+    const set = new Set([code])
+    if (code.startsWith('00')) set.add(code.slice(2))
+    if (code.startsWith('0')) set.add(code.slice(1))
+    set.add('0' + code)
+    return [...set]
+  }
+
+  function normBarcode(bc: string): string { return bc.replace(/^0+/, '') }
+
+  const handleScan = useCallback(async (code: string) => {
+    setScannerOpen(false)
+    // 1. Local cache lookup with UPC-A / EAN-13 variants
+    let local: StockItem | undefined
+    for (const v of barcodeVariants(code)) {
+      local = barcodeMap.get(v)
+      if (local) break
+    }
+    if (local) {
+      if (!addedCodes.has(local.itemCode)) addItem(local)
+      return
+    }
+    // 2. Server search fallback
+    setScanFinding(true)
+    try {
+      let res = await searchItems(code, 10, true)
+      if (res.items.length === 0) {
+        for (const v of barcodeVariants(code)) {
+          if (v === code) continue
+          res = await searchItems(v, 10, true)
+          if (res.items.length > 0) break
+        }
+      }
+      const codeNorm = normBarcode(code)
+      const found = res.items.find(i => i.barcode != null && normBarcode(i.barcode) === codeNorm)
+                    ?? (res.items.length === 1 ? res.items[0] : null)
+      if (found && !addedCodes.has(found.itemCode)) {
+        addItem(found)
+      } else {
+        setSearch(code)
+      }
+    } catch {
+      setSearch(code)
+    } finally {
+      setScanFinding(false)
+    }
+  }, [barcodeMap, addedCodes])
 
   // Queue all entries, then optionally generate (physical print)
   async function handlePrintAll(immediate: boolean) {
@@ -380,21 +440,31 @@ export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) 
           <>
             {/* Search to add items */}
             <div className="px-4 pt-3 pb-2 shrink-0">
-              <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  placeholder="Search products to add..."
-                  className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Search products to add..."
+                    className="w-full pl-8 pr-7 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-300"
+                    disabled={processing}
+                  />
+                  {search && (
+                    <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => setScannerOpen(true)}
                   disabled={processing}
-                />
-                {search && (
-                  <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">
-                    <X size={14} />
-                  </button>
-                )}
+                  className="px-2.5 py-2 border border-gray-200 rounded-lg text-gray-500 hover:text-violet-600 hover:border-violet-300 disabled:opacity-50"
+                  title="Scan barcode"
+                >
+                  {scanFinding ? <Loader2 size={18} className="animate-spin" /> : <ScanBarcode size={18} />}
+                </button>
               </div>
               {searchResults.length > 0 && (
                 <div className="mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-36 overflow-auto">
@@ -609,6 +679,7 @@ export default function BulkPrintSheet({ items, onClose }: BulkPrintSheetProps) 
           </>
         )}
       </div>
+      <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
     </div>
   )
 }
