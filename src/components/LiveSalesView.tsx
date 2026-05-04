@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, TrendingUp, TrendingDown, Search, ScanBarcode, ChevronDown, ChevronUp } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
 import {
   checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, getStockLevels, getItemSales,
   LIQUOR_DEPT_CODES, LIQUOR_DEPT_NAMES,
   type SalesSummary, type DepartmentBreakdown, type TopSeller, type StockItem,
 } from '../lib/jarvis'
+import { getSalesRange, parseIso, enumerateDates } from '../lib/salesHistoryCache'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import BarcodeScanner from './BarcodeScanner'
 import BarcodeStripe from './BarcodeStripe'
@@ -555,6 +556,9 @@ export default function LiveSalesView() {
               </div>
             )}
 
+            {/* Sales trend comparison chart */}
+            <SalesComparisonChart timeMode={timeMode} />
+
             {/* Department comparison bar chart */}
             {deptChartData.length > 0 && (
               <div>
@@ -949,6 +953,226 @@ export default function LiveSalesView() {
 
       </div>
       <BarcodeScanner open={scannerOpen} onScan={handleScan} onClose={() => setScannerOpen(false)} />
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Sales Comparison Chart — grouped bar chart: current vs prior period
+// ═══════════════════════════════════════════════════════════════════
+
+function getMonday(d: Date): Date {
+  const day = d.getDay()
+  const diff = (day === 0 ? -6 : 1) - day
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff)
+}
+
+interface CompBucket {
+  key: string
+  label: string
+  tooltipLabel: string
+  current: number
+  previous: number
+  isToday: boolean
+}
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function buildComparisonData(mode: TimeMode, now: Date) {
+  const today = isoDate(now)
+  const buckets: CompBucket[] = []
+  let currentFrom: Date, currentTo: Date, compareFrom: Date, compareTo: Date
+
+  if (mode === 'day') {
+    // Last 7 days, each compared to same weekday previous week
+    currentFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6)
+    currentTo = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    compareFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 13)
+    compareTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7)
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(currentFrom.getFullYear(), currentFrom.getMonth(), currentFrom.getDate() + i)
+      const iso = isoDate(d)
+      buckets.push({
+        key: iso,
+        label: DAY_NAMES[d.getDay()],
+        tooltipLabel: `${DAY_NAMES[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`,
+        current: 0, previous: 0,
+        isToday: iso === today,
+      })
+    }
+  } else if (mode === 'week') {
+    // This week Mon-Sun vs last week Mon-Sun
+    const monday = getMonday(now)
+    currentFrom = monday
+    currentTo = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6)
+    compareFrom = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7)
+    compareTo = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 1)
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)
+      const iso = isoDate(d)
+      buckets.push({
+        key: `day-${i}`,
+        label: DAY_NAMES[d.getDay()],
+        tooltipLabel: `${DAY_NAMES[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`,
+        current: 0, previous: 0,
+        isToday: iso === today,
+      })
+    }
+  } else {
+    // Month mode: weekly buckets for current month vs same month last year
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    currentFrom = monthStart
+    currentTo = monthEnd
+    const lastYearStart = new Date(now.getFullYear() - 1, now.getMonth(), 1)
+    const lastYearEnd = new Date(now.getFullYear() - 1, now.getMonth() + 1, 0)
+    compareFrom = lastYearStart
+    compareTo = lastYearEnd
+    const numWeeks = Math.ceil(monthEnd.getDate() / 7)
+    for (let i = 0; i < numWeeks; i++) {
+      buckets.push({
+        key: `wk-${i}`,
+        label: `Wk ${i + 1}`,
+        tooltipLabel: `Week ${i + 1} (days ${i * 7 + 1}-${Math.min((i + 1) * 7, monthEnd.getDate())})`,
+        current: 0, previous: 0,
+        isToday: false,
+      })
+    }
+  }
+  return { buckets, currentFrom, currentTo, compareFrom, compareTo }
+}
+
+function dateToBucketIndex(iso: string, mode: TimeMode, currentFrom: Date, isComparison: boolean): number {
+  const d = parseIso(iso)
+  if (mode === 'day' || mode === 'week') {
+    const base = isComparison
+      ? new Date(currentFrom.getFullYear(), currentFrom.getMonth(), currentFrom.getDate() - 7)
+      : currentFrom
+    const diff = Math.round((d.getTime() - base.getTime()) / (86400000))
+    return diff
+  }
+  // month mode: week-of-month bucket
+  return Math.floor((d.getDate() - 1) / 7)
+}
+
+function SalesComparisonChart({ timeMode }: { timeMode: TimeMode }) {
+  const [buckets, setBuckets] = useState<CompBucket[]>([])
+  const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
+
+  useEffect(() => {
+    let cancelled = false
+    const now = new Date()
+    const { buckets: emptyBuckets, currentFrom, currentTo, compareFrom, compareTo } = buildComparisonData(timeMode, now)
+    setBuckets(emptyBuckets)
+    setLoading(true)
+
+    const working = emptyBuckets.map(b => ({ ...b }))
+    let done = 0
+    const currentDates = enumerateDates(currentFrom, currentTo)
+    const compareDates = enumerateDates(compareFrom, compareTo)
+    const total = currentDates.length + compareDates.length
+    setProgress({ done: 0, total })
+
+    let flushTimer: ReturnType<typeof setTimeout> | null = null
+    const flush = () => {
+      if (cancelled) return
+      setBuckets(working.map(b => ({ ...b })))
+      setProgress({ done, total })
+      flushTimer = null
+    }
+    const scheduleFlush = () => {
+      if (!flushTimer) flushTimer = setTimeout(flush, 80)
+    }
+
+    async function run() {
+      // Stream current period
+      for await (const { iso, data } of getSalesRange(currentFrom, currentTo)) {
+        if (cancelled) return
+        const idx = dateToBucketIndex(iso, timeMode, currentFrom, false)
+        if (idx >= 0 && idx < working.length && data) {
+          working[idx].current += data.totalSales
+        }
+        done++
+        scheduleFlush()
+      }
+      // Stream comparison period
+      for await (const { iso, data } of getSalesRange(compareFrom, compareTo)) {
+        if (cancelled) return
+        const idx = dateToBucketIndex(iso, timeMode, currentFrom, true)
+        if (idx >= 0 && idx < working.length && data) {
+          working[idx].previous += data.totalSales
+        }
+        done++
+        scheduleFlush()
+      }
+      if (!cancelled) {
+        setBuckets(working.map(b => ({ ...b })))
+        setProgress({ done: total, total })
+        setLoading(false)
+      }
+    }
+    run()
+
+    return () => {
+      cancelled = true
+      if (flushTimer) clearTimeout(flushTimer)
+    }
+  }, [timeMode])
+
+  const totalCurrent = buckets.reduce((s, b) => s + b.current, 0)
+  const totalPrevious = buckets.reduce((s, b) => s + b.previous, 0)
+
+  const COMPARE_DESC: Record<TimeMode, string> = {
+    day: 'vs same day last week',
+    week: 'vs previous week',
+    month: 'vs same month last year',
+  }
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-700">Sales Trend</h2>
+          <p className="text-[10px] text-gray-400">{COMPARE_DESC[timeMode]}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {loading && (
+            <span className="text-[10px] text-gray-400">{progress.done}/{progress.total}</span>
+          )}
+          <DeltaBadge current={totalCurrent} previous={totalPrevious} label={COMPARE_LABELS[timeMode]} />
+        </div>
+      </div>
+      <div style={{ height: 180 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={buckets} barCategoryGap="20%">
+            <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#f3f4f6" />
+            <XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => fmtCompact(v)} width={45} />
+            <Tooltip
+              formatter={(value: number, name: string) => [`$${fmtMoney(value)}`, name === 'current' ? 'Current' : 'Previous']}
+              labelFormatter={(_: string, payload: any[]) => payload?.[0]?.payload?.tooltipLabel || ''}
+              contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e5e7eb' }}
+            />
+            <Bar dataKey="previous" name="Previous" radius={[3, 3, 0, 0]} fill="#a78bfa" fillOpacity={0.35} />
+            <Bar dataKey="current" name="Current" radius={[3, 3, 0, 0]}>
+              {buckets.map((b, i) => (
+                <Cell key={i} fill={b.isToday ? '#7c3aed' : '#8b5cf6'} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex items-center justify-center gap-4 mt-1">
+        <div className="flex items-center gap-1">
+          <div className="w-2.5 h-2.5 rounded-sm bg-violet-500" />
+          <span className="text-[10px] text-gray-500">Current</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-2.5 h-2.5 rounded-sm bg-violet-300 opacity-50" />
+          <span className="text-[10px] text-gray-500">Previous</span>
+        </div>
+      </div>
     </div>
   )
 }
