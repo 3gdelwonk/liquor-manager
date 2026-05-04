@@ -175,19 +175,35 @@ export default function LiveSalesView() {
     return () => clearInterval(id)
   }, [fetchAll])
 
-  // Fetch per-item daily sales when a department row is expanded
+  // Fetch per-item daily sales when a department row is expanded.
+  // Uses stock items (all dept items) + top sellers as candidate sources
+  // so we don't miss items that aren't in the global top-100.
   useEffect(() => {
-    if (!selectedDept || !topSellers) {
+    if (!selectedDept || !stockItems) {
       setDeptItemSales(new Map())
       setDeptItemsLoading(false)
       return
     }
 
-    const items = topSellers
-      .filter(s => LIQUOR_DEPT_NAMES.has(s.department) && s.department === selectedDept)
-      .slice(0, 10)
+    const candidateCodes = new Set<string>()
 
-    if (items.length === 0) {
+    // Stock items that sell regularly — primary source for full coverage
+    stockItems
+      .filter(s => s.department === selectedDept && s.isActive && (s.avgDayQty > 0 || s.avgWeekQty > 0))
+      .sort((a, b) => b.avgDayQty - a.avgDayQty)
+      .slice(0, 40)
+      .forEach(s => candidateCodes.add(s.itemCode))
+
+    // Also include top sellers in this dept (catches recently sold items
+    // that may have avgDayQty=0 in stock, e.g. new/seasonal items)
+    if (topSellers) {
+      for (const t of topSellers) {
+        if (t.department === selectedDept) candidateCodes.add(t.itemCode)
+      }
+    }
+
+    const candidates = [...candidateCodes].slice(0, 50)
+    if (candidates.length === 0) {
       setDeptItemSales(new Map())
       setDeptItemsLoading(false)
       return
@@ -200,7 +216,7 @@ export default function LiveSalesView() {
     const fetchDays = TOP_SELLER_DAYS[timeMode] + 1
     const { from, to } = periodDateRange(timeMode)
 
-    Promise.allSettled(items.map(item => getItemSales(item.itemCode, fetchDays)))
+    Promise.allSettled(candidates.map(code => getItemSales(code, fetchDays)))
       .then(results => {
         if (cancelled) return
 
@@ -227,7 +243,7 @@ export default function LiveSalesView() {
       })
 
     return () => { cancelled = true }
-  }, [selectedDept, timeMode, topSellers])
+  }, [selectedDept, timeMode, stockItems, topSellers])
 
   // ── Liquor-only derived data ────────────────────────────────────────────────
 
@@ -283,16 +299,34 @@ export default function LiveSalesView() {
 
   // Period-accurate items for the expanded department drill-down
   const periodDeptItems = useMemo(() => {
-    if (!selectedDept || deptItemsLoading || deptItemSales.size === 0) return null
+    if (!selectedDept || deptItemsLoading || deptItemSales.size === 0 || !stockItems) return null
 
-    const items = (topSellers ?? [])
-      .filter(s => LIQUOR_DEPT_NAMES.has(s.department) && s.department === selectedDept)
-      .map(s => {
-        const pd = deptItemSales.get(s.itemCode)
-        if (!pd || pd.qty <= 0) return null
-        return { ...s, quantitySold: pd.qty, revenue: pd.revenue, cost: pd.cost }
+    // Build description lookup from stock + top sellers
+    const infoMap = new Map<string, { description: string; department: string }>()
+    for (const s of stockItems) {
+      if (s.department === selectedDept) infoMap.set(s.itemCode, s)
+    }
+    if (topSellers) {
+      for (const t of topSellers) {
+        if (t.department === selectedDept && !infoMap.has(t.itemCode)) infoMap.set(t.itemCode, t)
+      }
+    }
+
+    const items: TopSeller[] = []
+    for (const [itemCode, pd] of deptItemSales) {
+      if (pd.qty <= 0) continue
+      const info = infoMap.get(itemCode)
+      if (!info) continue
+      items.push({
+        rank: 0,
+        itemCode,
+        description: info.description,
+        department: info.department,
+        quantitySold: pd.qty,
+        revenue: pd.revenue,
+        cost: pd.cost,
       })
-      .filter((x): x is TopSeller => x !== null)
+    }
 
     switch (itemSort) {
       case 'revenue': items.sort((a, b) => b.revenue - a.revenue); break
@@ -301,7 +335,7 @@ export default function LiveSalesView() {
     }
 
     return items.slice(0, 10)
-  }, [selectedDept, deptItemsLoading, deptItemSales, topSellers, itemSort])
+  }, [selectedDept, deptItemsLoading, deptItemSales, stockItems, topSellers, itemSort])
 
   const liquorStock = useMemo(
     () => stockItems ? stockItems.filter(s => LIQUOR_DEPT_CODES.has(s.departmentCode)) : [],
