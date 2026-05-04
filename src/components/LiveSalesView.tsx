@@ -1091,7 +1091,7 @@ function SalesComparisonChart({ timeMode }: { timeMode: TimeMode }) {
         if (cancelled) return
         const idx = dateToBucketIndex(iso, timeMode, currentFrom, false)
         if (idx >= 0 && idx < working.length && data) {
-          working[idx].current += data.totalSales
+          working[idx].current += data.totalRevenue
         }
         done++
         scheduleFlush()
@@ -1101,7 +1101,7 @@ function SalesComparisonChart({ timeMode }: { timeMode: TimeMode }) {
         if (cancelled) return
         const idx = dateToBucketIndex(iso, timeMode, currentFrom, true)
         if (idx >= 0 && idx < working.length && data) {
-          working[idx].previous += data.totalSales
+          working[idx].previous += data.totalRevenue
         }
         done++
         scheduleFlush()
