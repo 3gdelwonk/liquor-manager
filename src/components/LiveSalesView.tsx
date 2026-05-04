@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, TrendingUp, TrendingDown, Search, ScanBarcode, ChevronDown, ChevronUp } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import {
   checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, getStockLevels,
   LIQUOR_DEPT_CODES, LIQUOR_DEPT_NAMES,
   type SalesSummary, type DepartmentBreakdown, type TopSeller, type StockItem,
 } from '../lib/jarvis'
-import { getSalesRange, isoDate, parseIso } from '../lib/salesHistoryCache'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import BarcodeScanner from './BarcodeScanner'
 import BarcodeStripe from './BarcodeStripe'
@@ -30,14 +29,6 @@ const COMPARE_PERIOD: Record<TimeMode, string> = { day: 'yesterday', week: 'last
 const TOP_SELLER_DAYS: Record<TimeMode, number> = { day: 1, week: 7, month: 30 }
 const MODE_LABELS: Record<TimeMode, string> = { day: 'Today', week: 'This Week', month: 'This Month' }
 const COMPARE_LABELS: Record<TimeMode, string> = { day: 'yesterday', week: 'last week', month: 'last month' }
-
-// Historical bar graph config — how far back each sub-tab looks
-type HistConfig = { count: number; bucket: 'day' | 'week' | 'month'; rangeDays: number; title: string }
-const HIST_CONFIG: Record<TimeMode, HistConfig> = {
-  day:   { count: 7,  bucket: 'day',   rangeDays: 7,   title: 'Last 7 days' },
-  week:  { count: 4,  bucket: 'week',  rangeDays: 28,  title: 'Last 4 weeks' },
-  month: { count: 12, bucket: 'month', rangeDays: 365, title: 'Last 12 months' },
-}
 
 function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -122,7 +113,7 @@ export default function LiveSalesView() {
       const [summary, depts, sellers, stock] = await Promise.all([
         getSalesSummary(period),
         getDepartmentBreakdown(period),
-        getTopSellers(days, 100),
+        getTopSellers(days, 100, period),
         getStockLevels(),
       ])
       setCurrentSummary(summary)
@@ -496,9 +487,6 @@ export default function LiveSalesView() {
               </div>
             )}
 
-            {/* Historical sales trend bar graph */}
-            <SalesHistoryChart timeMode={timeMode} />
-
             {/* Department breakdown — tappable rows with drill-down */}
             {liquorDepts.length > 0 && (
               <div>
@@ -840,199 +828,3 @@ export default function LiveSalesView() {
   )
 }
 
-// ─── SalesHistoryChart ─────────────────────────────────────────────────────
-// Bar graph of revenue over the previous N periods (7d / 4w / 12mo).
-// Fetches one ISO date per day from JARVISmart and aggregates into
-// calendar-aligned buckets. Streams bars in as data arrives so the
-// chart appears progressively rather than blocking on the slowest call.
-// Past-day data is cached in localStorage forever (see salesHistoryCache.ts).
-// ────────────────────────────────────────────────────────────────────────────
-
-interface BucketData {
-  key: string         // unique bucket id
-  label: string       // x-axis label
-  tooltipLabel: string
-  revenue: number
-  isCurrent: boolean  // bucket containing today
-}
-
-function bucketKeyForDate(iso: string, mode: TimeMode): string {
-  const d = parseIso(iso)
-  if (mode === 'day') return iso
-  if (mode === 'week') {
-    // ISO-style week start (Monday). Key = YYYY-MM-DD of that Monday.
-    const day = d.getDay()                  // 0=Sun..6=Sat
-    const offset = day === 0 ? -6 : 1 - day
-    const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + offset)
-    return isoDate(monday)
-  }
-  // month
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-function buildEmptyBuckets(mode: TimeMode, now: Date): BucketData[] {
-  const cfg = HIST_CONFIG[mode]
-  const out: BucketData[] = []
-  if (mode === 'day') {
-    for (let i = cfg.count - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)
-      const iso = isoDate(d)
-      out.push({
-        key: iso,
-        label: d.toLocaleDateString('en-AU', { weekday: 'short' }) + ' ' + d.getDate(),
-        tooltipLabel: d.toLocaleDateString('en-AU', { weekday: 'short', day: '2-digit', month: 'short' }),
-        revenue: 0,
-        isCurrent: i === 0,
-      })
-    }
-  } else if (mode === 'week') {
-    // Anchor to current week's Monday
-    const todayDay = now.getDay()
-    const offset = todayDay === 0 ? -6 : 1 - todayDay
-    const thisMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset)
-    for (let i = cfg.count - 1; i >= 0; i--) {
-      const monday = new Date(thisMonday.getFullYear(), thisMonday.getMonth(), thisMonday.getDate() - i * 7)
-      const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6)
-      out.push({
-        key: isoDate(monday),
-        label: `${monday.getDate()}/${monday.getMonth() + 1}`,
-        tooltipLabel: `Week of ${monday.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' })} → ${sunday.toLocaleDateString('en-AU', { day: '2-digit', month: 'short' })}`,
-        revenue: 0,
-        isCurrent: i === 0,
-      })
-    }
-  } else {
-    // month
-    for (let i = cfg.count - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      out.push({
-        key,
-        label: d.toLocaleDateString('en-AU', { month: 'short' }),
-        tooltipLabel: d.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }),
-        revenue: 0,
-        isCurrent: i === 0,
-      })
-    }
-  }
-  return out
-}
-
-function SalesHistoryChart({ timeMode }: { timeMode: TimeMode }) {
-  const cfg = HIST_CONFIG[timeMode]
-  const [buckets, setBuckets] = useState<BucketData[]>(() => buildEmptyBuckets(timeMode, new Date()))
-  const [progress, setProgress] = useState({ done: 0, total: cfg.rangeDays })
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    // Per-effect-run cancel flag (closure variable, NOT a shared ref).
-    // Critical because React StrictMode invokes the effect twice in dev,
-    // and switching tabs spawns a fresh run while the old loop is still
-    // mid-fetch. Each run must cancel only itself, otherwise old loops
-    // keep writing into new buckets via mismatched index Maps.
-    let cancelled = false
-
-    const now = new Date()
-    const cfgLocal = HIST_CONFIG[timeMode]
-    const initial = buildEmptyBuckets(timeMode, now)
-    setBuckets(initial)
-    setProgress({ done: 0, total: cfgLocal.rangeDays })
-    setLoading(true)
-
-    // Index buckets by key for O(1) lookup as days stream in
-    const index = new Map<string, number>()
-    initial.forEach((b, i) => index.set(b.key, i))
-
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (cfgLocal.rangeDays - 1))
-    const to = now;
-
-    (async () => {
-      let done = 0
-      const pending = new Map<number, number>()
-      let flushScheduled = false
-      const flush = () => {
-        flushScheduled = false
-        if (cancelled || pending.size === 0) return
-        const snapshot = [...pending.entries()]
-        pending.clear()
-        setBuckets(prev => {
-          const next = [...prev]
-          for (const [idx, addRev] of snapshot) {
-            if (next[idx]) next[idx] = { ...next[idx], revenue: next[idx].revenue + addRev }
-          }
-          return next
-        })
-      }
-      const scheduleFlush = () => {
-        if (flushScheduled || cancelled) return
-        flushScheduled = true
-        setTimeout(flush, 100)
-      }
-
-      try {
-        for await (const { iso, data } of getSalesRange(from, to)) {
-          if (cancelled) return
-          done++
-          if (data) {
-            const k = bucketKeyForDate(iso, timeMode)
-            const idx = index.get(k)
-            if (idx !== undefined) {
-              pending.set(idx, (pending.get(idx) ?? 0) + data.totalRevenue)
-              scheduleFlush()
-            }
-          }
-          if (!cancelled) setProgress({ done, total: cfgLocal.rangeDays })
-        }
-        flush()
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-
-    return () => { cancelled = true }
-  }, [timeMode])
-
-  const hasData = buckets.some(b => b.revenue > 0)
-  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 100
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-semibold text-gray-700">
-          Sales Trend <span className="text-xs font-normal text-gray-400">— {cfg.title}</span>
-        </h2>
-        {loading && (
-          <span className="text-[10px] text-gray-400 bg-gray-50 px-2 py-0.5 rounded font-mono">
-            {progress.done}/{progress.total} ({pct}%)
-          </span>
-        )}
-      </div>
-      <div style={{ height: 160 }} className={loading && !hasData ? 'opacity-40' : ''}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={buckets} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-            <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-            <YAxis
-              tick={{ fontSize: 9, fill: '#9ca3af' }}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(v: number) => fmtCompact(v)}
-              width={48}
-            />
-            <Tooltip
-              cursor={{ fill: 'rgba(139, 92, 246, 0.08)' }}
-              formatter={(v: number) => [`$${fmtMoney(v)}`, 'Revenue']}
-              labelFormatter={(_l, p) => (p?.[0]?.payload as BucketData | undefined)?.tooltipLabel ?? ''}
-              contentStyle={{ fontSize: 11, padding: '4px 8px' }}
-            />
-            <Bar dataKey="revenue" radius={[2, 2, 0, 0]}>
-              {buckets.map(b => (
-                <Cell key={b.key} fill={b.isCurrent ? '#7c3aed' : '#a78bfa'} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  )
-}

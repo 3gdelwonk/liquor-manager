@@ -299,19 +299,37 @@ export async function getDepartmentBreakdown(period: 'today' | 'week' | 'month' 
   }));
 }
 
-export async function getTopSellers(days = 7, limit = 20): Promise<TopSeller[]> {
+export async function getTopSellers(
+  days = 7,
+  limit = 20,
+  period?: 'today' | 'week' | 'month' | string,
+): Promise<TopSeller[]> {
+  const mapItems = (raw: { period: string; items: RawTopSeller[] }) =>
+    raw.items.map(t => ({
+      rank:          t.rank,
+      itemCode:      t.itemCode,
+      description:   t.description,
+      department:    t.department,
+      quantitySold:  t.qtySold,
+      revenue:       t.revenue,
+      cost:          t.cost,
+    }));
+
+  if (period) {
+    try {
+      const raw = await jarvisFetch<{ period: string; items: RawTopSeller[] }>(
+        `/api/pos/top-sellers?period=${encodeURIComponent(period)}&limit=${limit}`
+      );
+      return mapItems(raw);
+    } catch {
+      // API may not support period param — fall through to days-based call
+    }
+  }
+
   const raw = await jarvisFetch<{ period: string; items: RawTopSeller[] }>(
     `/api/pos/top-sellers?days=${days}&limit=${limit}`
   );
-  return raw.items.map(t => ({
-    rank:          t.rank,
-    itemCode:      t.itemCode,
-    description:   t.description,
-    department:    t.department,
-    quantitySold:  t.qtySold,
-    revenue:       t.revenue,
-    cost:          t.cost,
-  }));
+  return mapItems(raw);
 }
 
 function mapRawStockItem(s: RawStockItem): StockItem {
