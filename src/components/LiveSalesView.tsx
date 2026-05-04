@@ -187,22 +187,20 @@ export default function LiveSalesView() {
 
     const candidateCodes = new Set<string>()
 
-    // Stock items that sell regularly — primary source for full coverage
-    stockItems
-      .filter(s => s.department === selectedDept && s.isActive && (s.avgDayQty > 0 || s.avgWeekQty > 0))
-      .sort((a, b) => b.avgDayQty - a.avgDayQty)
-      .slice(0, 40)
-      .forEach(s => candidateCodes.add(s.itemCode))
+    // All active stock items in this department — no avg-sales filter
+    // so we never miss items that were actually sold in the period
+    for (const s of stockItems) {
+      if (s.department === selectedDept && s.isActive) candidateCodes.add(s.itemCode)
+    }
 
-    // Also include top sellers in this dept (catches recently sold items
-    // that may have avgDayQty=0 in stock, e.g. new/seasonal items)
+    // Also include top sellers in this dept (catches items not yet in stock feed)
     if (topSellers) {
       for (const t of topSellers) {
         if (t.department === selectedDept) candidateCodes.add(t.itemCode)
       }
     }
 
-    const candidates = [...candidateCodes].slice(0, 50)
+    const candidates = [...candidateCodes]
     if (candidates.length === 0) {
       setDeptItemSales(new Map())
       setDeptItemsLoading(false)
