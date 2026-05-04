@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, TrendingUp, TrendingDown, Search, ScanBarcode, ChevronDown, ChevronUp } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import {
-  checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, getStockLevels,
+  checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, getStockLevels, getItemSales,
   LIQUOR_DEPT_CODES, LIQUOR_DEPT_NAMES,
   type SalesSummary, type DepartmentBreakdown, type TopSeller, type StockItem,
 } from '../lib/jarvis'
@@ -49,6 +49,22 @@ function deltaColor(delta: number | null) {
   return delta >= 0 ? 'text-green-600' : 'text-red-500'
 }
 
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function periodDateRange(mode: TimeMode): { from: string; to: string } {
+  const now = new Date()
+  const to = isoDate(now)
+  if (mode === 'day') return { from: to, to }
+  if (mode === 'week') {
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6)
+    return { from: isoDate(from), to }
+  }
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
+  return { from: isoDate(from), to }
+}
+
 function DeltaBadge({ current, previous, label }: { current: number; previous: number | null; label: string }) {
   if (previous === null || previous === 0) return <p className="text-xs text-gray-400">{label}</p>
   const delta = ((current - previous) / previous) * 100
@@ -83,6 +99,10 @@ export default function LiveSalesView() {
   // Comparison period data (best-effort)
   const [, setCompareSummary] = useState<SalesSummary | null>(null)
   const [compareDepts, setCompareDepts] = useState<DepartmentBreakdown[]>([])
+
+  // Per-item period-accurate sales (fetched lazily when a department row is expanded)
+  const [deptItemSales, setDeptItemSales] = useState<Map<string, { qty: number; revenue: number; cost: number }>>(new Map())
+  const [deptItemsLoading, setDeptItemsLoading] = useState(false)
 
   const [stockSearch, setStockSearch] = useState('')
   const [scannerOpen, setScannerOpen] = useState(false)
@@ -155,6 +175,60 @@ export default function LiveSalesView() {
     return () => clearInterval(id)
   }, [fetchAll])
 
+  // Fetch per-item daily sales when a department row is expanded
+  useEffect(() => {
+    if (!selectedDept || !topSellers) {
+      setDeptItemSales(new Map())
+      setDeptItemsLoading(false)
+      return
+    }
+
+    const items = topSellers
+      .filter(s => LIQUOR_DEPT_NAMES.has(s.department) && s.department === selectedDept)
+      .slice(0, 10)
+
+    if (items.length === 0) {
+      setDeptItemSales(new Map())
+      setDeptItemsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setDeptItemsLoading(true)
+    setDeptItemSales(new Map())
+
+    const fetchDays = TOP_SELLER_DAYS[timeMode] + 1
+    const { from, to } = periodDateRange(timeMode)
+
+    Promise.allSettled(items.map(item => getItemSales(item.itemCode, fetchDays)))
+      .then(results => {
+        if (cancelled) return
+
+        const map = new Map<string, { qty: number; revenue: number; cost: number }>()
+
+        for (const result of results) {
+          if (result.status !== 'fulfilled') continue
+          const data = result.value
+
+          let qty = 0, revenue = 0, cost = 0
+          for (const sale of data.dailySales) {
+            if (sale.date >= from && sale.date <= to) {
+              qty += sale.qty
+              revenue += sale.revenue
+              cost += sale.cost
+            }
+          }
+
+          map.set(data.itemCode, { qty, revenue, cost })
+        }
+
+        setDeptItemSales(map)
+        setDeptItemsLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [selectedDept, timeMode, topSellers])
+
   // ── Liquor-only derived data ────────────────────────────────────────────────
 
   const liquorDepts = useMemo(
@@ -206,6 +280,28 @@ export default function LiveSalesView() {
       case 'profit': return list.sort((a, b) => (b.revenue - b.cost) - (a.revenue - a.cost))
     }
   }, [liquorSellers, itemSort])
+
+  // Period-accurate items for the expanded department drill-down
+  const periodDeptItems = useMemo(() => {
+    if (!selectedDept || deptItemsLoading || deptItemSales.size === 0) return null
+
+    const items = (topSellers ?? [])
+      .filter(s => LIQUOR_DEPT_NAMES.has(s.department) && s.department === selectedDept)
+      .map(s => {
+        const pd = deptItemSales.get(s.itemCode)
+        if (!pd || pd.qty <= 0) return null
+        return { ...s, quantitySold: pd.qty, revenue: pd.revenue, cost: pd.cost }
+      })
+      .filter((x): x is TopSeller => x !== null)
+
+    switch (itemSort) {
+      case 'revenue': items.sort((a, b) => b.revenue - a.revenue); break
+      case 'qty': items.sort((a, b) => b.quantitySold - a.quantitySold); break
+      case 'profit': items.sort((a, b) => (b.revenue - b.cost) - (a.revenue - a.cost)); break
+    }
+
+    return items.slice(0, 10)
+  }, [selectedDept, deptItemsLoading, deptItemSales, topSellers, itemSort])
 
   const liquorStock = useMemo(
     () => stockItems ? stockItems.filter(s => LIQUOR_DEPT_CODES.has(s.departmentCode)) : [],
@@ -498,8 +594,6 @@ export default function LiveSalesView() {
                     const delta = prev && prev.sales > 0
                       ? ((d.sales - prev.sales) / prev.sales) * 100
                       : null
-                    const deptSellers = isOpen ? sortedSellers.filter(s => s.department === d.department) : []
-
                     return (
                       <div key={d.code} className="bg-white border border-gray-100 rounded-lg overflow-hidden shadow-sm">
                         <button
@@ -531,7 +625,11 @@ export default function LiveSalesView() {
                         {/* Drill-down: top products in this department */}
                         {isOpen && (
                           <div className="border-t border-gray-100 bg-gray-50 px-3 py-2 space-y-0.5">
-                            {deptSellers.length > 0 ? (
+                            {deptItemsLoading || periodDeptItems === null ? (
+                              <div className="flex items-center justify-center py-3">
+                                <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                              </div>
+                            ) : periodDeptItems.length > 0 ? (
                               <>
                                 <div className="flex items-center justify-between mb-1.5">
                                   <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">
@@ -551,7 +649,7 @@ export default function LiveSalesView() {
                                     ))}
                                   </div>
                                 </div>
-                                {deptSellers.slice(0, 10).map((item, i) => {
+                                {periodDeptItems.map((item, i) => {
                                   const barcode = itemCodeToBarcode.get(item.itemCode) ?? null
                                   const orderCode = getOrderCode(barcode)
                                   const gp = item.revenue - item.cost
@@ -587,14 +685,9 @@ export default function LiveSalesView() {
                                     </div>
                                   )
                                 })}
-                                {deptSellers.length > 10 && (
-                                  <p className="text-[10px] text-gray-400 text-center pt-1">
-                                    +{deptSellers.length - 10} more items
-                                  </p>
-                                )}
                               </>
                             ) : (
-                              <p className="text-xs text-gray-400 py-2 text-center">No item data for this period</p>
+                              <p className="text-xs text-gray-400 py-2 text-center">No items sold this period</p>
                             )}
                           </div>
                         )}
